@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Environment & secrets
+.env
+secrets/
+*.bin
+
+# Logs & runtime artifacts
+logs/
+*.log
+
+# Database
+database/backups/
+pgdata/
+
+# Tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Packaging
+*.spec.bak

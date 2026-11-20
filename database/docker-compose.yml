@@ -1,0 +1,30 @@
+# JARVIS development database: PostgreSQL 16 with pgvector.
+# Usage:  docker compose -f database/docker-compose.yml up -d
+#
+# Note: if the compose project name clashes, set a unique name below.
+# The service publishes on localhost:5433 to coexist with a native
+# PostgreSQL that may already occupy 5432. Point JARVIS_DATABASE_URL at
+# port 5433 when using this container.
+
+services:
+  jarvis-db:
+    image: pgvector/pgvector:pg16
+    container_name: jarvis-db
+    environment:
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: jarvis
+      POSTGRES_DB: jarvis
+    ports:
+      - "5433:5432"
+    volumes:
+      - jarvis_pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jarvis -d jarvis"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  jarvis_pgdata:
+    name: jarvis_pgdata
