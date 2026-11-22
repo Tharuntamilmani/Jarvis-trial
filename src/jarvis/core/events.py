@@ -29,7 +29,7 @@ class Event:
         """Serialise the event payload (excluding the timestamp)."""
         return {
             k: v
-            for k, v in dataclasses.as_dict(self).items()
+            for k, v in dataclasses.asdict(self).items()
             if k != "timestamp"
         }
 

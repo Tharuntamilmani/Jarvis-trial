@@ -11,6 +11,14 @@ from typing import Any
 from PySide6.QtCore import QObject, Signal
 
 
+_ENGINE_SERVICE_STATUS = {
+    "running": ("healthy", "running"),
+    "starting": ("starting", "starting"),
+    "stopped": ("stopped", "stopped"),
+    "kill_switch": ("degraded", "emergency stop"),
+}
+
+
 class AppState(QObject):
     """Observable shared state (one instance for the whole app)."""
 
@@ -42,6 +50,8 @@ class AppState(QObject):
     def set_engine_state(self, state: str) -> None:
         self.engine_state = state
         self.engine_state_changed.emit(state)
+        status, detail = _ENGINE_SERVICE_STATUS.get(state, ("unknown", state))
+        self.apply_service_status("engine", status, detail)
 
     def apply_service_status(self, service: str, status: str, detail: str = "") -> None:
         self.service_statuses[service] = status
@@ -54,6 +64,21 @@ class AppState(QObject):
             "detail": detail,
         }
         self.provider_health_changed.emit(provider, available, detail)
+
+        # The shared "providers" chip is an aggregate signal: at least one
+        # reachable provider means routing is still possible. Individual
+        # provider rows remain driven by provider_health_changed.
+        total = len(self.provider_health)
+        if total == 0:
+            return
+        online = sum(
+            1 for info in self.provider_health.values() if info["available"]
+        )
+        self.apply_service_status(
+            "providers",
+            "healthy" if online else "unavailable",
+            f"{online}/{total} available",
+        )
 
     def set_kill_switch(self, active: bool) -> None:
         self.kill_switch_active = active

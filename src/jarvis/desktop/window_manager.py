@@ -72,6 +72,9 @@ class WindowManager(QObject):
             window.switch_workspace_requested.connect(
                 lambda: self.switch_mode(Mode.WORKSPACE)
             )
+            window.switch_floating_requested.connect(
+                lambda: self.switch_mode(Mode.FLOATING)
+            )
         elif key == Mode.WORKSPACE:
             window = WorkspaceWindow(self._state, self._chat_controller)
             window.show_hud_requested.connect(
@@ -82,7 +85,14 @@ class WindowManager(QObject):
             )
             window.closed.connect(lambda: self.close_window(Mode.WORKSPACE))
         elif key == Mode.FLOATING:
-            window = FloatingWindow(self._state)
+            handler = (
+                self._submit_quick_command
+                if self._chat_controller is not None
+                else None
+            )
+            window = FloatingWindow(
+                self._state, command_handler=handler
+            )
             window.expand_workspace_requested.connect(
                 lambda: self.switch_mode(Mode.WORKSPACE)
             )
@@ -144,6 +154,25 @@ class WindowManager(QObject):
         """Close every window (used by shutdown only)."""
         for key in list(self._windows):
             self.close_window(key)
+
+    # -- Floating quick command ------------------------------------------------------------
+
+    def _submit_quick_command(self, text: str) -> bool:
+        """Route a floating quick command through the existing chat path.
+
+        This is deliberately not a command executor: it only submits text to
+        ChatController.send(), which enforces availability and kill-switch
+        policy. The text is left intact when the request is rejected.
+        """
+        controller = self._chat_controller
+        if controller is None or not controller.service_available:
+            return False
+        if not controller.can_send(text):
+            return False
+        if controller.send(text) is None:
+            return False
+        self.switch_mode(Mode.WORKSPACE)
+        return True
 
     # -- Mode switching ------------------------------------------------------------------
 

@@ -11,7 +11,6 @@ Creates the target database if it does not exist (connects to the
 from __future__ import annotations
 
 import argparse
-import asyncio
 import sys
 from pathlib import Path
 

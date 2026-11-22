@@ -492,3 +492,71 @@ async def test_stream_events_are_serializable_dataclasses(
     for event in events:
         assert dataclasses.is_dataclass(event)
     store.delete_secret("groq_api_key")
+
+
+@pytest.mark.asyncio
+async def test_early_close_closes_line_iterator_before_response(
+    groq_settings, store
+) -> None:
+    """Early exit must close aiter_lines() before the HTTP response."""
+
+    class _FakeStream:
+        def __init__(self, order: list[str]) -> None:
+            self.order = order
+
+        async def aclose(self) -> None:
+            self.order.append("stream")
+
+    class _FakeResponse:
+        status_code = 200
+
+        def __init__(self) -> None:
+            self.order: list[str] = []
+            self.lines_gen = None
+            self.stream = _FakeStream(self.order)
+
+        def aiter_lines(self):
+            self.lines_gen = self._lines()
+            return self.lines_gen
+
+        async def _lines(self):
+            try:
+                yield (
+                    'data: {"choices":[{"delta":{"content":"first"}}]}\n'
+                )
+                yield (
+                    'data: {"choices":[{"delta":{"content":"second"}}]}\n'
+                )
+            finally:
+                self.order.append("lines")
+
+        async def aclose(self) -> None:
+            self.order.append("response")
+
+    class _FakeClient:
+        def __init__(self, response: _FakeResponse) -> None:
+            self.response = response
+
+        def build_request(self, *args, **kwargs):
+            return object()
+
+        async def send(self, request, stream: bool = False):
+            return self.response
+
+        async def aclose(self) -> None:
+            return None
+
+    response = _FakeResponse()
+    provider = _authed(groq_settings, store, lambda request: None)
+    provider._auth_headers = lambda: {"Authorization": "Bearer test"}  # noqa: SLF001
+    await provider._client.aclose()  # noqa: SLF001 - test swap
+    provider._client = _FakeClient(response)  # noqa: SLF001
+
+    gen = provider.stream(_request("req-early-close"))
+    assert isinstance(await gen.__anext__(), StreamStart)
+    assert isinstance(await gen.__anext__(), Token)
+    await gen.aclose()
+
+    assert response.order == ["stream", "lines", "response"]
+    await provider.aclose()
+    store.delete_secret("groq_api_key")

@@ -145,6 +145,9 @@ class CoreEngine:
         self.lifecycle.set_health_check(
             "database", lambda: self._database_health()
         )
+        self.lifecycle.set_health_check(
+            "kill_switch", lambda: not self.lifecycle.kill_switch_active
+        )
 
     async def _database_health(self) -> bool:
         db: DatabaseService | None = self.registry.try_get("database")

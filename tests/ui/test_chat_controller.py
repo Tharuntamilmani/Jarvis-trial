@@ -523,6 +523,26 @@ async def test_completed_conversation_is_retained_for_reopen() -> None:
     assert [m.content for m in controller.messages] == ["hello", "hi there"]
 
 
+async def test_shutdown_cancels_request_while_dispatch_is_pending() -> None:
+    service = FakeChatService()
+    service.gate = asyncio.Event()
+    controller = _controller(
+        service=service, request_id_factory=lambda: "pending-request"
+    )
+
+    rid = controller.send("hello")
+    await asyncio.sleep(0)  # dispatch started and is awaiting the gate
+    assert controller._dispatch_task is not None  # noqa: SLF001
+    assert not controller._dispatch_task.done()  # noqa: SLF001
+
+    await controller.shutdown()
+    await controller.shutdown()  # idempotent
+
+    assert service.cancels == [rid]
+    assert controller.active_request_id is None
+    assert controller.busy is False
+
+
 async def test_shutdown_during_streaming_is_clean() -> None:
     service = FakeChatService()
     controller = _controller(service=service)

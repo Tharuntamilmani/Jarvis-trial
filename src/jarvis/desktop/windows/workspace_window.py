@@ -214,6 +214,12 @@ class WorkspaceWindow(QWidget):
             self._controller.provider_status_changed.connect(
                 self._refresh_provider_rows
             )
+        for service, chip in self._chips.items():
+            status = self._state.service_statuses.get(service)
+            if status is not None:
+                chip.set_status(
+                    status, self._state.service_details.get(service, "")
+                )
 
     def _on_service_status(self, service: str, status: str, detail: str) -> None:
         key = service if service in self._chips else None

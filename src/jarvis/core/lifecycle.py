@@ -149,6 +149,9 @@ class LifecycleManager:
         for task in list(self._kill_tasks):
             if not task.done():
                 task.cancel()
+        await self._set_status(
+            "kill_switch", ServiceStatus.UNAVAILABLE, "engaged"
+        )
         await self._bus.publish(KillSwitchTriggered(reason=reason))
 
     async def rearm_kill_switch(self) -> None:
@@ -157,6 +160,7 @@ class LifecycleManager:
             return
         self._kill_switch_active = False
         log.info("kill switch re-armed")
+        await self._set_status("kill_switch", ServiceStatus.HEALTHY, "armed")
         await self._bus.publish(KillSwitchRearmed())
 
     @contextlib.asynccontextmanager

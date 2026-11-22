@@ -1,7 +1,7 @@
 # JARVIS — Native Windows AI Desktop Assistant
 
 Python 3.12 · PySide6 · PostgreSQL + pgvector · Phase 1 complete ·
-Phase 2 in progress (native streaming Workspace chat, Stage 2.6).
+Phase 2 in progress (native streaming Workspace chat, Stage 2.7).
 
 ## Quick start (development)
 

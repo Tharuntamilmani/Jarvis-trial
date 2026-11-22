@@ -22,6 +22,7 @@ class HudWindow(QWidget):
 
     hide_requested = Signal()
     switch_workspace_requested = Signal()
+    switch_floating_requested = Signal()
 
     def __init__(self, state: AppState, parent: QWidget | None = None) -> None:
         super().__init__(
@@ -36,6 +37,7 @@ class HudWindow(QWidget):
 
         self._build_ui()
         self._connect_state()
+        self._mirror_current_state()
 
     # -- UI ------------------------------------------------------------------
 
@@ -97,7 +99,20 @@ class HudWindow(QWidget):
     def _connect_state(self) -> None:
         self._state.service_status_changed.connect(self._on_service_status)
         self._state.assistant_state_changed.connect(self._on_assistant_state)
-        self._state.engine_state_changed.connect(self._on_engine_state)
+        self._state.kill_switch_changed.connect(self._on_kill_switch)
+
+    def _mirror_current_state(self) -> None:
+        """Hydrate indicators that were published before this window existed."""
+        for service, chip in self._chips.items():
+            status = self._state.service_statuses.get(service)
+            if status is not None:
+                chip.set_status(
+                    status, self._state.service_details.get(service, "")
+                )
+        if self._state.kill_switch_active:
+            self._on_kill_switch(True)
+        else:
+            self._on_assistant_state(self._state.assistant_state or "idle")
 
     def _on_service_status(self, service: str, status: str, detail: str) -> None:
         key = service if service in self._chips else None
@@ -108,12 +123,16 @@ class HudWindow(QWidget):
                 return
         self._chips[key].set_status(status, detail)
 
-    def _on_engine_state(self, state: str) -> None:
-        if state == "kill_switch":
+    def _on_kill_switch(self, active: bool) -> None:
+        if active:
             self.orb.set_state("kill_switch")
             self.assistant_label.setText("EMERGENCY STOP ENGAGED")
+            return
+        self._on_assistant_state(self._state.assistant_state or "idle")
 
     def _on_assistant_state(self, state: str) -> None:
+        if self._state.kill_switch_active:
+            return
         self.orb.set_state(state)
         self.assistant_label.setText(state.upper())
 
@@ -129,7 +148,7 @@ class HudWindow(QWidget):
             self.switch_workspace_requested.emit()
             return
         if key == Qt.Key.Key_F:
-            self._state.push_notification("info", "floating not yet wired")
+            self.switch_floating_requested.emit()
             return
         super().keyPressEvent(event)
 

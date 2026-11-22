@@ -60,8 +60,6 @@ class DesktopApplication:
         self.tray.show()
         self.tray.notify("JARVIS", "Core engine starting…")
         await self.core.start()
-        providers = await self.core.engine.registry.get("providers")
-        await providers.refresh_health()
 
         # The controller outlives disposable Workspace windows, so the
         # conversation survives close/reopen and tray-only operation.
@@ -96,8 +94,20 @@ class DesktopApplication:
             return None
         task = loop.create_task(coro)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._on_task_done)
         return task
+
+    def _on_task_done(self, task: asyncio.Task) -> None:
+        """Retrieve task failures so qasync never reports them as unhandled."""
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            log.error(
+                "desktop async action failed",
+                exc_info=(type(error), error, error.__traceback__),
+            )
 
     def _schedule_shutdown(self) -> None:
         self._schedule(self.request_shutdown())
@@ -109,9 +119,9 @@ class DesktopApplication:
 
     async def _on_kill_switch(self) -> None:
         if self.core.engine.kill_switch_active:
-            await self.core.rearm_kill_switch()
+            await self.core.engine.rearm_kill_switch()
         else:
-            await self.core.trigger_kill_switch("manual: tray")
+            await self.core.engine.trigger_kill_switch("manual: tray")
 
     # -- Shutdown -----------------------------------------------------------------------
 

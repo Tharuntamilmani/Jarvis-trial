@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -25,7 +27,13 @@ class FloatingWindow(QWidget):
     command_submitted = Signal(str)
     expand_workspace_requested = Signal()
 
-    def __init__(self, state: AppState, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        state: AppState,
+        parent: QWidget | None = None,
+        *,
+        command_handler: Callable[[str], bool] | None = None,
+    ) -> None:
         super().__init__(
             parent,
             Qt.WindowType.FramelessWindowHint
@@ -36,10 +44,12 @@ class FloatingWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.resize(280, 340)
         self._state = state
+        self._command_handler = command_handler
         self._drag_offset: QPoint | None = None
 
         self._build_ui()
         self._connect_state()
+        self._mirror_current_state()
         self._position_bottom_right()
 
     # -- UI ---------------------------------------------------------------------
@@ -74,6 +84,9 @@ class FloatingWindow(QWidget):
         self.command_input = QLineEdit()
         self.command_input.setPlaceholderText("Quick command… (Enter)")
         self.command_input.returnPressed.connect(self._submit)
+        if self._command_handler is None:
+            self.command_input.setEnabled(False)
+            self.command_input.setPlaceholderText("Quick command unavailable")
         layout.addWidget(self.command_input)
 
         expand = QLabel("⤢ expand")
@@ -86,10 +99,31 @@ class FloatingWindow(QWidget):
 
     def _connect_state(self) -> None:
         self._state.assistant_state_changed.connect(self._on_assistant_state)
+        self._state.kill_switch_changed.connect(self._on_kill_switch)
+
+    def _mirror_current_state(self) -> None:
+        if self._state.kill_switch_active:
+            self._on_kill_switch(True)
+        else:
+            self._on_assistant_state(self._state.assistant_state or "idle")
 
     def _on_assistant_state(self, state: str) -> None:
+        if self._state.kill_switch_active:
+            return
         self.orb.set_state(state)
         self.state_label.setText(state)
+
+    def _on_kill_switch(self, active: bool) -> None:
+        if active:
+            self.orb.set_state("kill_switch")
+            self.state_label.setText("emergency stop")
+            self.command_input.setEnabled(False)
+            self.command_input.setPlaceholderText("Emergency stop engaged")
+            return
+        self._on_assistant_state(self._state.assistant_state or "idle")
+        if self._command_handler is not None:
+            self.command_input.setEnabled(True)
+            self.command_input.setPlaceholderText("Quick command… (Enter)")
 
     def _position_bottom_right(self) -> None:
         screen = self.screen() or self.windowHandle().screen()
@@ -105,9 +139,13 @@ class FloatingWindow(QWidget):
 
     def _submit(self) -> None:
         text = self.command_input.text().strip()
-        if text:
-            self.command_submitted.emit(text)
-            self.command_input.clear()
+        if not text or self._command_handler is None:
+            return
+        if not self._command_handler(text):
+            self.state_label.setText("not sent")
+            return
+        self.command_submitted.emit(text)
+        self.command_input.clear()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:

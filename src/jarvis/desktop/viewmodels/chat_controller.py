@@ -669,14 +669,16 @@ class ChatController(QObject):
         # 2-3. Deny the pending prompt and resolve its future.
         self._deny_pending_consent()
         self.consent_dismissed.emit()
-        # 4. Cancel the UI dispatch task (start_chat may still be awaiting).
+        # 4. Snapshot the request before cancelling dispatch: the dispatch
+        # failure path clears _active_request_id, and the service request
+        # must still be cancelled exactly once.
+        request_id = self._active_request_id
         dispatch = self._dispatch_task
         if dispatch is not None and not dispatch.done():
             dispatch.cancel()
             await asyncio.gather(dispatch, return_exceptions=True)
         self._dispatch_task = None
         # 5. Cancel the active ChatService request exactly once.
-        request_id = self._active_request_id
         if request_id is not None:
             await self._cancel_for_shutdown(request_id)
         # 6. Clear pending UI state (conversation content is retained).
