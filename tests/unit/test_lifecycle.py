@@ -112,6 +112,21 @@ async def test_kill_switch_cancels_tasks_and_blocks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_kill_switch_updates_service_status() -> None:
+    registry = ServiceRegistry()
+    bus = EventBus()
+    lifecycle = LifecycleManager(registry, bus)
+    registry.register("kill_switch", lambda: object())
+    await lifecycle.startup()
+
+    await lifecycle.trigger_kill_switch(reason="probe")
+    assert lifecycle.statuses["kill_switch"] is ServiceStatus.UNAVAILABLE
+
+    await lifecycle.rearm_kill_switch()
+    assert lifecycle.statuses["kill_switch"] is ServiceStatus.HEALTHY
+
+
+@pytest.mark.asyncio
 async def test_status_events_published() -> None:
     registry = ServiceRegistry()
     bus = EventBus()

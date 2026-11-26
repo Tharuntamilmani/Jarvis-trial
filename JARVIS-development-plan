@@ -1,0 +1,110 @@
+1. Non-Negotiable Engineering Rules
+1.1 Platform & Architecture
+Native Windows 11 desktop application using PySide6 only (no HTML, WebView, FastAPI, Flask, Electron, or browser UI).
+Strict Core/UI separation: core, intelligence, conversations, memory, agents, voice, vision, tools, security, and database must never import PySide6.
+UI communicates with Core exclusively through defined controllers, services, and typed EventBus events.
+Preserve existing working modules; inspect before editing; no unnecessary rewrites.
+1.2 Privacy & Cloud Restrictions
+Local-first by default: Ollama is the primary local provider; Groq is an explicitly consented cloud fallback.
+Groq receives ONLY: JARVIS_SYSTEM_PROMPT + the current user message (2 messages). No conversation history, memories, RAG chunks, tool outputs, biometrics, or hidden context.
+SHA-256 fingerprint-bound, per-request consent: bound to exact provider, model, and canonical payload; verified immediately before dispatch; expires and never carries over across retries.
+1.3 Security
+Fail-closed architecture; default-deny for dangerous capabilities; explicit approval before consequential actions.
+Pre-execution permission checks + CommandAllowlist.
+Append-only audit_log with database-level UPDATE/DELETE protection.
+Windows DPAPI for secrets and biometric embeddings (no plaintext secrets in config, logs, DB, or diagnostic exports).
+1.4 Implementation Discipline
+One stage at a time; never advance until the current stage passes its verification gate.
+Never weaken security/privacy contracts or test assertions.
+Never modify the jarvis development database during testing; use isolated jarvis_test only.
+2. Stage Overview & Dependency Graph
+Stage 2.8 Gate B (Conversation Management, Retry & Model UI)
+   │
+   ├──────────────────────────┐
+   ▼                          ▼
+Phase 3 (Memory & RAG)    Phase 5 (Voice)     Phase 6 (Vision & Biometrics)
+   │                                              [Parallel with Phases 3–4]
+   ▼
+Phase 4 (Agents & Planner)
+   │
+   ▼
+Phase 7 (Tools, Sandbox & Security UI)  ◄── Phase 1 Security Foundations
+   │
+   ▼
+Phase 8 (Settings, Lifecycle, Windows Integration, Backups & Packaging)
+3. Stage 2.8 Gate B: Conversation Management, Retry & Model UI
+
+Prerequisite: Gate A (GO verified) · Current Target
+
+Step	Scope	Key Modules	Verification Gate
+B1	Startup stale-generation reconciliation: durably transition prior-session pending/streaming rows (owner_session_id != current_session_id) to interrupted (ErrorCategory.INTERRUPTED) on startup.	conversations/repository.py, conversations/service.py, desktop/application.py	Unit + jarvis_test integration + startup UI tests
+B2	Conversation history & management: populate WorkspaceWindow sidebar & HistoryView (list, search, switch, local auto-title, rename, delete with confirmation + cascade + active-pointer cleanup).	conversations/repository.py, conversations/service.py, chat_controller.py, workspace_window.py, views/history_view.py	Switching blocked while busy/finalizing; cascade delete & pointer cleanup verified in jarvis_test
+B3	Explicit Turn Retry & message actions: Retry button on failed/cancelled/interrupted assistant bubbles via persist_retry(), plus copy & metadata display.	chat_models.py, chat_controller.py, views/message_bubble.py, views/chat_view.py	Assistant-only retry via retry_of_request_id; no user-message duplication; cancellation/finalization race tests
+B4	Provider/Model selector UI & DB recovery: Auto, Ollama:<model>, Groq:<model> selector + Retry DB button reusing DatabaseService.health_check() + ConversationService.	core/engine.py, database/connection.py, chat_controller.py, views/chat_view.py	Explicit Groq still enforces consent + 2-message payload; failed DB retry keeps UI locked
+B5	Gate B independent audit.	All Gate B files	Full pytest + 32+ jarvis_test integration + Ruff + independent audit
+4. Phase 3: Six-Tier Memory & Local Knowledge (pgvector)
+
+Prerequisite: Stage 2.8 Gate B
+
+Step	Scope	Key Modules	Verification Gate
+3.1	Working & Short-Term Memory (task scratchpad + ring buffer integrated into local history).	memory/working_memory.py, memory/short_term.py, memory/conversation.py	Token/message bound tests; cloud payload excludes history
+3.2	Local Embedding Service (Ollama embeddings matching migration embedding_dim, bounded timeouts).	memory/embeddings.py, config/settings.py	Unit tests + jarvis_test vector dimension parity
+3.3	Semantic & Episodic Stores + Dedup (memories & episodes HNSW pgvector retrieval, cosine dedup, recency/importance scoring).	memory/long_term.py, memory/manager.py	jarvis_test insert, dedup, top-k retrieval, deletion
+3.4	User Preferences & Consolidation Proposals (propose candidates with confidence scores; explicit Remember/Forget; procedural workflows stored in memories with kind="procedural" or via explicit migration).	memory/preferences.py, memory/manager.py	Zero unapproved messages become permanent
+3.5	Local Document/Folder RAG (opt-in PDF/Markdown/code indexing into pgvector for local Ollama Q&A).	memory/rag.py, core/events.py	Cloud isolation test: RAG chunks never enter CloudPayload
+3.6	Workspace Memory View (approve, edit, pin, delete proposed/stored memories).	desktop/views/memory_view.py, workspace_window.py	UI tests + Phase 3 independent audit
+5. Phase 4: Autonomous Agents, Planner & HUD Activity
+
+Prerequisite: Phase 3
+
+Step	Scope	Key Modules	Verification Gate
+4.1	Agent Contracts & Manager (BaseAgent, AgentManager, concurrency limits, cancellation, kill-switch registration, agent_runs DB persistence).	agents/base_agent.py, agents/manager.py, core/events.py	Concurrency, cancellation, and persistence tests
+4.2	Task Planner (decompose goals into dependency-ordered steps using working memory).	agents/planner.py	Deterministic plan DAG & failure-stop tests
+4.3	Built-in Agents (ChatAgent, ResearchAgent, read-only SystemAgent).	agents/builtin/	Isolated execution & privacy tests
+4.4	Scheduled/Recurring Tasks (local timer/cron runner integrated with LifecycleManager).	agents/scheduler.py	Graceful shutdown drains/cancels scheduled runs
+4.5	Workspace Agents View & HUD Activity Feed.	desktop/views/agents_view.py, desktop/windows/hud_window.py	Live event-bridge updates & Workspace UI tests
+6. Phase 5: Voice & Audio Interaction
+
+Prerequisite: Phase 2 (can run in parallel with Phases 3–4)
+
+Step	Scope	Key Modules	Verification Gate
+5.1	Audio I/O & VAD (sounddevice capture/playback, VAD, graceful missing-mic fallback).	voice/audio_io.py, voice/vad.py	Mocked audio tests & device failure fallback
+5.2	Local STT (faster-whisper streaming transcription, push-to-talk + continuous mode).	voice/stt.py	Transcription pipeline & cancellation tests
+5.3	Wake Word (OpenWakeWord offline "Jarvis" detection) & Voice Controller.	voice/wake_word.py, voice/service.py	Wake → listen → ChatController.send() routing
+5.4	Local TTS (Piper TTS streaming synthesis, interrupt-on-barge-in, mute toggle).	voice/tts.py	Barge-in cancellation & audio-level events
+5.5	UI Controls (mic/mute toggles + audio-reactive OrbWidget).	desktop/common/orb.py, floating_window.py, hud_window.py	UI tests + Phase 5 verification
+7. Phase 6: Vision, Local Biometrics & Gestures
+
+Prerequisite: Phase 1/2 (can run in parallel with Phase 5)
+
+Step	Scope	Key Modules	Verification Gate
+6.1	Camera Service (OpenCV frame capture in memory only, explicit opt-in toggle, visible indicator).	vision/camera.py	Zero raw-frame disk writes; clean release on disable/shutdown
+6.2	Local Biometric Store & Face Recognition (InsightFace embeddings stored only in Windows DPAPI, never Postgres/logs/cloud).	security/biometrics.py, vision/face.py	Security test proving embeddings never touch Postgres or CloudPayload
+6.3	Profile Greeting, Auto-Lock & Gesture Controls (MediaPipe hand gestures for HUD/Floating toggles).	vision/gestures.py, vision/service.py	Greeting event, gesture debounce & kill-switch tests
+8. Phase 7: Tools, Sandbox, Security UI & Windows Automation
+
+Prerequisite: Phase 4 + Phase 1 Security Foundations
+
+Step	Scope	Key Modules	Verification Gate
+7.1	Typed Tool Registry & Execution Sandbox (ToolSpec, capability declarations, timeouts, pre-execution PermissionPolicy + CommandAllowlist).	tools/registry.py, security/sandbox.py	Default-deny dangerous; unapproved calls blocked before execution
+7.2	Interactive Approval UI & DB-Backed Audit (ApprovalService → approval cards, dual-write to append-only audit_log with correlation IDs, auto-kill-switch on repeated failures).	desktop/views/approval_overlay.py, security/audit.py	Fail-closed timeout/close tests; append-only audit_log DB tests
+7.3	Core Windows Tools (safe file read/organize, app launcher, clipboard manager, screenshot + local OCR/VLM, live CPU/RAM/GPU/disk telemetry).	tools/filesystem.py, tools/system.py, tools/clipboard.py, tools/telemetry.py	Path traversal/input validation & approval gate per destructive action
+7.4	Workspace Security, Audit & Telemetry UI (permission toggles, allowlist editor, audit_log viewer, HUD telemetry gauges).	desktop/views/security_view.py, hud_window.py	UI tests + end-to-end security audit
+9. Phase 8: Settings, Windows Integration, Reliability, Backups & Packaging
+
+Prerequisite: Phases 3, 4, 5, 6, and 7
+
+Step	Scope	Key Modules	Verification Gate
+8.1	Full Settings UI (models, themes/accents, voice/camera toggles, hotkeys, DPAPI key manager, retention/backup config).	desktop/views/settings_view.py, config/settings.py	Settings persistence & DPAPI isolation tests
+8.2	Global Summon Hotkeys & Windows Toast Notifications.	desktop/hotkeys.py, desktop/tray.py	Hotkey registration, conflict handling & cleanup
+8.3	Scheduled Backups & Restore (scripts/backup_db.py / restore_db.py, retention).	scripts/backup_db.py, scripts/restore_db.py	Backup/restore round-trip against jarvis_test
+8.4	Performance Tuning & PyInstaller Packaging (cold start < 3 s, local first token < 500 ms).	packaging/, pyproject.toml	Clean-machine Windows 11 smoke test
+8.5	Application Lifecycle & Crash Recovery (single-instance lock, graceful shutdown, managed worker cleanup, crash recovery without auto-replaying destructive actions).	desktop/application.py, core/lifecycle.py, core/events.py, conversations/service.py	Forced termination/restart, DB interruption during shutdown, no duplicate destructive execution
+8.6	Windows 11 Integration (optional startup-with-Windows registration/removal, tray controls, Windows notifications, DPI scaling, global shortcut conflicts).	desktop/tray.py, desktop/hotkeys.py, desktop/windows_integration.py	Startup reg/unreg, tray, notification, hotkey conflict & clean-machine tests
+8.7	Diagnostics & Release Validation (privacy-safe local diagnostic report, dependency/PG/pgvector/Ollama/model health checks, fresh install & clean uninstall validation).	diagnostics/, desktop/views/settings_view.py, packaging/	Secret-leak regression tests, missing dependency scenarios, install/uninstall & final release audit
+10. Standard Verification Gate (Required for Every Stage)
+Unit & UI tests: python -m pytest tests/unit tests/ui -v --tb=short
+PostgreSQL integration tests (against jarvis_test only, 0 skipped): python -m pytest tests/integration/test_conversation_persistence.py tests/integration/test_migration_0002.py tests/integration/test_db_session_lifecycle.py tests/integration/test_database.py -v --tb=short
+Privacy & security regression tests: python -m pytest tests/unit/test_imports.py tests/unit/test_cloud_payload.py tests/unit/test_consent.py tests/unit/test_security.py -v --tb=short
+Ruff: python -m ruff check . and python -m ruff format --check <changed_files>
+Independent read-only acceptance audit confirming jarvis dev DB and privacy contracts are untouched.

@@ -289,29 +289,61 @@ class OllamaProvider(LLMProvider):
             tokens_used = 0
             saw_record = False
 
-            async for line in http_response.aiter_lines():
-                line = line.strip()
-                if not line:
-                    continue  # tolerate empty keep-alive lines
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise ProviderResponseError(
-                        "malformed NDJSON line from Ollama"
-                    ) from exc
-                if not isinstance(record, dict):
-                    raise ProviderResponseError("malformed NDJSON line from Ollama")
-                saw_record = True
+            # ``async for`` does not close an async generator on early exit.
+            # Without the explicit aclose() below, the line/text generator
+            # frames are finalized later under a different task, which makes
+            # anyio/httpcore report "async generator ignored GeneratorExit".
+            lines = http_response.aiter_lines()
+            try:
+                async for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue  # tolerate empty keep-alive lines
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise ProviderResponseError(
+                            "malformed NDJSON line from Ollama"
+                        ) from exc
+                    if not isinstance(record, dict):
+                        raise ProviderResponseError(
+                            "malformed NDJSON line from Ollama"
+                        )
+                    saw_record = True
 
-                done = bool(record.get("done", False))
-                chunk = record.get("message", {}).get("content", "")
-                if chunk:
-                    parts.append(chunk)
-                    yield Token(request_id=request.request_id, seq=seq, text=chunk)
-                    seq += 1
-                if done:
-                    tokens_used = int(record.get("eval_count", 0) or 0)
-                    break
+                    done = bool(record.get("done", False))
+                    chunk = record.get("message", {}).get("content", "")
+                    if chunk:
+                        parts.append(chunk)
+                        yield Token(
+                            request_id=request.request_id,
+                            seq=seq,
+                            text=chunk,
+                        )
+                        seq += 1
+                    if done:
+                        tokens_used = int(record.get("eval_count", 0) or 0)
+                        break
+            finally:
+                # Under qasync, closing the line generator while the byte
+                # stream is still open makes httpcore's GeneratorExit guard
+                # run in a different task. Close the byte stream first, then
+                # the line iterator, then the response (outer finally).
+                stream = getattr(http_response, "stream", None)
+                if stream is not None:
+                    try:
+                        await stream.aclose()
+                    except Exception:  # noqa: BLE001 - cleanup only
+                        log.warning(
+                            "failed to close Ollama response stream",
+                            exc_info=True,
+                        )
+                try:
+                    await lines.aclose()
+                except Exception:  # noqa: BLE001 - cleanup must not mask cancel
+                    log.warning(
+                        "failed to close Ollama line iterator", exc_info=True
+                    )
 
             if not saw_record:
                 # A stream that closes without any record is a broken

@@ -342,37 +342,69 @@ class GroqProvider(LLMProvider):
             tokens_used = 0
             saw_record = False
 
-            async for raw_line in http_response.aiter_lines():
-                line = raw_line.strip()
-                if not line or line.startswith(":"):
-                    continue  # blank line or SSE comment / keep-alive
-                if not line.startswith("data:"):
-                    raise ProviderResponseError("malformed SSE line from Groq")
-                data = line[len("data:"):].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    record = json.loads(data)
-                except json.JSONDecodeError as exc:
-                    raise ProviderResponseError("malformed SSE record from Groq") from exc
-                if not isinstance(record, dict):
-                    raise ProviderResponseError("malformed SSE record from Groq")
-                saw_record = True
-
-                usage = record.get("usage") or {}
-                if usage.get("total_tokens") is not None:
-                    tokens_used = int(usage["total_tokens"] or 0)
-
-                choices = record.get("choices", [])
-                if choices:
-                    delta = choices[0].get("delta", {}) or {}
-                    chunk = delta.get("content", "") or ""
-                    if chunk:
-                        parts.append(chunk)
-                        yield Token(
-                            request_id=request.request_id, seq=seq, text=chunk
+            # Close the line generator before the response; otherwise its
+            # finalizer runs in another task and anyio reports a GeneratorExit
+            # violation on cancellation/early close.
+            lines = http_response.aiter_lines()
+            try:
+                async for raw_line in lines:
+                    line = raw_line.strip()
+                    if not line or line.startswith(":"):
+                        continue  # blank line or SSE comment / keep-alive
+                    if not line.startswith("data:"):
+                        raise ProviderResponseError(
+                            "malformed SSE line from Groq"
                         )
-                        seq += 1
+                    data = line[len("data:"):].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        record = json.loads(data)
+                    except json.JSONDecodeError as exc:
+                        raise ProviderResponseError(
+                            "malformed SSE record from Groq"
+                        ) from exc
+                    if not isinstance(record, dict):
+                        raise ProviderResponseError(
+                            "malformed SSE record from Groq"
+                        )
+                    saw_record = True
+
+                    usage = record.get("usage") or {}
+                    if usage.get("total_tokens") is not None:
+                        tokens_used = int(usage["total_tokens"] or 0)
+
+                    choices = record.get("choices", [])
+                    if choices:
+                        delta = choices[0].get("delta", {}) or {}
+                        chunk = delta.get("content", "") or ""
+                        if chunk:
+                            parts.append(chunk)
+                            yield Token(
+                                request_id=request.request_id,
+                                seq=seq,
+                                text=chunk,
+                            )
+                            seq += 1
+            finally:
+                # Close the byte stream before the line generator: closing
+                # the generator while the connection is open makes httpcore's
+                # GeneratorExit guard run under another task in qasync.
+                stream = getattr(http_response, "stream", None)
+                if stream is not None:
+                    try:
+                        await stream.aclose()
+                    except Exception:  # noqa: BLE001 - cleanup only
+                        log.warning(
+                            "failed to close Groq response stream",
+                            exc_info=True,
+                        )
+                try:
+                    await lines.aclose()
+                except Exception:  # noqa: BLE001 - cleanup must not mask cancel
+                    log.warning(
+                        "failed to close Groq line iterator", exc_info=True
+                    )
 
             if not saw_record:
                 raise ProviderResponseError("Groq stream ended without records")

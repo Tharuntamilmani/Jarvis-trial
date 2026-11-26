@@ -53,9 +53,18 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 5
     db_pool_recycle_seconds: int = 300
+    # Bounded database operations (Stage 2.8). The persistence deadline is the
+    # outer application-level budget; the driver/pool/statement bounds keep a
+    # single hung operation from outliving it by an unbounded margin.
+    db_connect_timeout_seconds: float = Field(default=5.0, gt=0)
+    db_pool_timeout_seconds: float = Field(default=3.0, gt=0)
+    db_statement_timeout_ms: int = Field(default=5000, ge=100)
+    db_persistence_deadline_seconds: float = Field(default=3.0, gt=0)
 
     # Embeddings — fixed per database; changed only via explicit migrations.
     embedding_dim: int = Field(default=1024, ge=64, le=65536)
+    ollama_embedding_model: str = "nomic-embed-text"
+    memory_dedup_threshold: float = Field(default=0.92, ge=0.0, le=1.0)
 
     # Backup (foundation)
     backup_dir: Path = PROJECT_ROOT / "database" / "backups"

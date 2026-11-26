@@ -7,12 +7,16 @@ to the shared AppState, so no core engine is required here.
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 
 from jarvis.desktop.viewmodels.app_state import AppState
+from jarvis.desktop.viewmodels.chat_controller import ChatController
 from jarvis.desktop.window_manager import Mode, WindowManager
 from jarvis.desktop.windows.floating_window import FloatingWindow
 from jarvis.desktop.windows.hud_window import HudWindow
 from jarvis.desktop.windows.workspace_window import WorkspaceWindow
+from tests.ui.chat_test_helpers import StubConversationPersistence
 
 
 @pytest.fixture()
@@ -111,3 +115,157 @@ def test_shutdown_closes_everything(qtbot, state) -> None:
     wm.shutdown()
     assert wm.open_keys == ()
     assert state.engine_state == "stopped"
+
+
+# -- Status integration (Stage 2.7) -------------------------------------------------
+
+
+def test_status_chips_hydrate_from_shared_state(qtbot, state) -> None:
+    state.apply_service_status("database", "healthy", "connected")
+    state.set_engine_state("running")
+    state.apply_service_status("kill_switch", "healthy", "armed")
+
+    hud = HudWindow(state)
+    ws = WorkspaceWindow(state)
+    for window in (hud, ws):
+        qtbot.addWidget(window)
+
+    assert hud._chips["database"].current_status == "connected"  # noqa: SLF001
+    assert hud._chips["engine"].current_status == "running"  # noqa: SLF001
+    assert hud._chips["kill_switch"].current_status == "armed"  # noqa: SLF001
+    assert ws._chips["engine"].current_status == "running"  # noqa: SLF001
+
+
+def test_engine_status_mapping_is_applied_to_shared_state(state) -> None:
+    state.set_engine_state("running")
+    assert state.service_statuses["engine"] == "healthy"
+    assert state.service_details["engine"] == "running"
+
+    state.set_engine_state("kill_switch")
+    assert state.service_statuses["engine"] == "degraded"
+
+
+def test_provider_chip_aggregates_availability(state) -> None:
+    state.apply_provider_health("ollama", True, "connected")
+    assert state.service_statuses["providers"] == "healthy"
+    assert state.service_details["providers"] == "1/1 available"
+
+    state.apply_provider_health("groq", False, "not configured")
+    assert state.service_statuses["providers"] == "healthy"
+    assert state.service_details["providers"] == "1/2 available"
+
+    state.apply_provider_health("ollama", False, "offline")
+    assert state.service_statuses["providers"] == "unavailable"
+    assert state.service_details["providers"] == "0/2 available"
+
+
+def test_hud_kill_switch_restores_on_rearm(qtbot, state) -> None:
+    state.set_assistant_state("thinking")
+    hud = HudWindow(state)
+    qtbot.addWidget(hud)
+    assert hud.orb.state == "thinking"
+
+    state.set_kill_switch(True)
+    assert hud.orb.state == "kill_switch"
+    assert hud.assistant_label.text() == "EMERGENCY STOP ENGAGED"
+
+    # Assistant-state events must not replace the emergency indicator.
+    state.set_assistant_state("speaking")
+    assert hud.orb.state == "kill_switch"
+    assert hud.assistant_label.text() == "EMERGENCY STOP ENGAGED"
+
+    state.set_kill_switch(False)
+    assert hud.orb.state == "speaking"
+    assert hud.assistant_label.text() == "SPEAKING"
+
+
+def test_floating_orb_reflects_kill_switch(qtbot, state) -> None:
+    state.set_assistant_state("thinking")
+    floating = FloatingWindow(state, command_handler=lambda _text: True)
+    qtbot.addWidget(floating)
+    assert floating.orb.state == "thinking"
+
+    state.set_kill_switch(True)
+    assert floating.orb.state == "kill_switch"
+    assert floating.state_label.text() == "emergency stop"
+    assert not floating.command_input.isEnabled()
+
+    state.set_kill_switch(False)
+    assert floating.orb.state == "thinking"
+    assert floating.command_input.isEnabled()
+
+
+def test_hud_f_requests_floating_mode(qtbot, state) -> None:
+    hud = HudWindow(state)
+    qtbot.addWidget(hud)
+    fired: list[bool] = []
+    hud.switch_floating_requested.connect(lambda: fired.append(True))
+
+    QTest.keyClick(hud, Qt.Key.Key_F)
+
+    assert fired == [True]
+
+
+def test_window_manager_hud_f_switches_to_floating(qtbot, state) -> None:
+    wm = WindowManager(state)
+    wm.switch_mode(Mode.HUD)
+    wm.window(Mode.HUD).switch_floating_requested.emit()  # noqa: SLF001
+    assert wm.is_visible(Mode.FLOATING)
+
+
+def test_floating_without_handler_is_clearly_disabled(qtbot, state) -> None:
+    floating = FloatingWindow(state)
+    qtbot.addWidget(floating)
+    assert not floating.command_input.isEnabled()
+    assert "unavailable" in floating.command_input.placeholderText().lower()
+
+
+def test_rejected_quick_command_keeps_text(qtbot, state) -> None:
+    seen: list[str] = []
+
+    def reject(text: str) -> bool:
+        seen.append(text)
+        return False
+
+    floating = FloatingWindow(state, command_handler=reject)
+    qtbot.addWidget(floating)
+    floating.command_input.setText("hello")
+    floating.command_input.returnPressed.emit()
+
+    assert seen == ["hello"]
+    assert floating.command_input.text() == "hello"
+    assert floating.state_label.text() == "not sent"
+
+
+async def test_floating_quick_command_routes_through_chat(qtbot, state) -> None:
+    class _Service:
+        def __init__(self) -> None:
+            self.request_ids: list[str] = []
+
+        async def start_chat(
+            self, messages, *, provider=None, model=None, request_id=None
+        ) -> str:
+            self.request_ids.append(request_id)
+            return request_id
+
+    service = _Service()
+    controller = ChatController(
+        state,
+        service,
+        None,
+        conversations=StubConversationPersistence(),
+        request_id_factory=lambda: "quick-request",
+    )
+    wm = WindowManager(state, controller)
+
+    wm.show_window(Mode.FLOATING)
+    floating = wm.window(Mode.FLOATING)
+    floating.command_input.setText("hello")
+    floating.command_input.returnPressed.emit()
+
+    assert wm.is_visible(Mode.WORKSPACE)
+    assert [m.content for m in controller.messages] == ["hello", ""]
+    assert floating.command_input.text() == ""
+
+    await controller.wait_idle()
+    assert service.request_ids == ["quick-request"]

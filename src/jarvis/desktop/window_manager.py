@@ -53,27 +53,65 @@ class WindowManager(QObject):
         self,
         state: AppState,
         chat_controller=None,
+        voice_controller=None,
+        vision_controller=None,
+        security_controller=None,
+        preferences_service=None,
     ) -> None:
         super().__init__()
         self._state = state
         self._chat_controller = chat_controller
+        self._voice_controller = voice_controller
+        self._vision_controller = vision_controller
+        self._security_controller = security_controller
+        self._preferences_service = preferences_service
         self._windows: dict[str, QWidget] = {}
 
     def attach_chat_controller(self, controller) -> None:
         """Attach the app-owned chat controller before windows are created."""
         self._chat_controller = controller
 
+    def attach_voice_controller(self, controller) -> None:
+        """Attach the app-owned voice controller before windows are created."""
+        self._voice_controller = controller
+
+    def attach_vision_controller(self, controller) -> None:
+        """Attach the app-owned vision controller before windows are created."""
+        self._vision_controller = controller
+
+    def attach_security_controller(self, controller) -> None:
+        """Attach the app-owned security controller before windows are created."""
+        self._security_controller = controller
+
+    def attach_preferences_service(self, service) -> None:
+        """Attach the app-owned preferences service before windows are created."""
+        self._preferences_service = service
+
     # -- Creation ----------------------------------------------------------------
 
     def _create(self, key: str) -> QWidget:
         if key == Mode.HUD:
-            window: QWidget = HudWindow(self._state)
+            window: QWidget = HudWindow(
+                self._state,
+                voice_controller=self._voice_controller,
+                vision_controller=self._vision_controller,
+            )
             window.hide_requested.connect(lambda: self.hide_window(Mode.HUD))
             window.switch_workspace_requested.connect(
                 lambda: self.switch_mode(Mode.WORKSPACE)
             )
+            window.switch_floating_requested.connect(
+                lambda: self.switch_mode(Mode.FLOATING)
+            )
         elif key == Mode.WORKSPACE:
-            window = WorkspaceWindow(self._state, self._chat_controller)
+            window = WorkspaceWindow(
+                self._state,
+                self._chat_controller,
+                voice_controller=self._voice_controller,
+                vision_controller=self._vision_controller,
+                security_controller=self._security_controller,
+                preferences_service=self._preferences_service,
+            )
             window.show_hud_requested.connect(
                 lambda: self.switch_mode(Mode.HUD)
             )
@@ -82,7 +120,17 @@ class WindowManager(QObject):
             )
             window.closed.connect(lambda: self.close_window(Mode.WORKSPACE))
         elif key == Mode.FLOATING:
-            window = FloatingWindow(self._state)
+            handler = (
+                self._submit_quick_command
+                if self._chat_controller is not None
+                else None
+            )
+            window = FloatingWindow(
+                self._state,
+                command_handler=handler,
+                voice_controller=self._voice_controller,
+                vision_controller=self._vision_controller,
+            )
             window.expand_workspace_requested.connect(
                 lambda: self.switch_mode(Mode.WORKSPACE)
             )
@@ -144,6 +192,25 @@ class WindowManager(QObject):
         """Close every window (used by shutdown only)."""
         for key in list(self._windows):
             self.close_window(key)
+
+    # -- Floating quick command ------------------------------------------------------------
+
+    def _submit_quick_command(self, text: str) -> bool:
+        """Route a floating quick command through the existing chat path.
+
+        This is deliberately not a command executor: it only submits text to
+        ChatController.send(), which enforces availability and kill-switch
+        policy. The text is left intact when the request is rejected.
+        """
+        controller = self._chat_controller
+        if controller is None or not controller.service_available:
+            return False
+        if not controller.can_send(text):
+            return False
+        if controller.send(text) is None:
+            return False
+        self.switch_mode(Mode.WORKSPACE)
+        return True
 
     # -- Mode switching ------------------------------------------------------------------
 

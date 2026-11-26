@@ -29,7 +29,7 @@ class Event:
         """Serialise the event payload (excluding the timestamp)."""
         return {
             k: v
-            for k, v in dataclasses.as_dict(self).items()
+            for k, v in dataclasses.asdict(self).items()
             if k != "timestamp"
         }
 
@@ -95,6 +95,13 @@ class ApprovalRequested(Event):
     request_id: str = ""
     action: str = ""
     summary: str = ""
+    tool_id: str = ""
+    risk_level: str = ""
+    target: str = ""
+    arguments_summary: str = ""
+    agent_run_id: str = ""
+    fingerprint: str = ""
+    timeout_seconds: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -112,6 +119,16 @@ class AuditRecordWritten(Event):
 
     action: str = ""
     result: str = ""
+
+
+@dataclass(frozen=True)
+class TelemetryUpdated(Event):
+    """Local hardware telemetry snapshot (Phase 7.4, never sent to cloud)."""
+
+    cpu_percent: float = 0.0
+    ram_percent: float = 0.0
+    disk_percent: float = 0.0
+    gpu_percent: float | None = None
 
 
 # --- Intelligence providers -------------------------------------------------
@@ -220,3 +237,167 @@ class CloudConsentDecided(Event):
     granted: bool = False
     decided_by: str = "fail_closed"  # user | timeout | fail_closed
     fingerprint: str = ""
+
+
+@dataclass(frozen=True)
+class AgentRunStarted(Event):
+    """An agent run began execution (Phase 4)."""
+
+    run_id: str = ""
+    agent_id: str = ""
+    parent_run_id: str = ""
+
+
+@dataclass(frozen=True)
+class AgentStepUpdated(Event):
+    """An agent run reported step progress (Phase 4)."""
+
+    run_id: str = ""
+    agent_id: str = ""
+    step: str = ""
+    progress: float = 0.0
+
+
+@dataclass(frozen=True)
+class AgentRunFinished(Event):
+    """An agent run reached a terminal status (Phase 4)."""
+
+    run_id: str = ""
+    agent_id: str = ""
+    status: str = ""
+    duration_ms: int = 0
+    error_category: str = ""
+
+
+@dataclass(frozen=True)
+class AudioDeviceConnected(Event):
+    """An audio input/output device became available (Phase 5.1)."""
+
+    device_id: str = ""
+    device_name: str = ""
+    direction: str = "input"  # input | output
+
+
+@dataclass(frozen=True)
+class AudioDeviceDisconnected(Event):
+    """An audio input/output device was removed (Phase 5.1)."""
+
+    device_id: str = ""
+    device_name: str = ""
+    direction: str = "input"
+
+
+@dataclass(frozen=True)
+class AudioErrorOccurred(Event):
+    """A non-fatal audio subsystem error occurred (Phase 5.1)."""
+
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class AudioLevelUpdated(Event):
+    """Smoothed/normalized audio RMS level for UI orb reactivity (Phase 5)."""
+
+    level: float = 0.0
+    direction: str = "input"  # input | output
+
+
+@dataclass(frozen=True)
+class VoiceTranscriptPartial(Event):
+    """Intermediate streaming STT transcript (never submits chat)."""
+
+    text: str = ""
+    confidence: float = 0.0
+
+
+@dataclass(frozen=True)
+class VoiceTranscriptReady(Event):
+    """Finalized local STT transcript eligible for ChatController.send()."""
+
+    text: str = ""
+    language: str = ""
+    confidence: float = 0.0
+
+
+@dataclass(frozen=True)
+class VoiceStateChanged(Event):
+    """Voice subsystem state and microphone privacy indicator changed."""
+
+    state: str = "disabled"
+    mic_active: bool = False
+    wake_word_enabled: bool = False
+
+
+@dataclass(frozen=True)
+class WakeWordDetected(Event):
+    """Offline wake word triggered listening."""
+
+    phrase: str = ""
+    score: float = 0.0
+
+
+@dataclass(frozen=True)
+class CameraConnected(Event):
+    """A camera device became available (Phase 6.1)."""
+
+    device_id: str = ""
+    device_name: str = ""
+
+
+@dataclass(frozen=True)
+class CameraDisconnected(Event):
+    """A camera device was removed or lost (Phase 6.1)."""
+
+    device_id: str = ""
+    device_name: str = ""
+
+
+@dataclass(frozen=True)
+class VisionErrorOccurred(Event):
+    """A non-fatal vision/camera subsystem error occurred (Phase 6.1)."""
+
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class VisionStateChanged(Event):
+    """Vision subsystem state and camera-active indicator changed (Phase 6.1)."""
+
+    state: str = "disabled"
+    camera_active: bool = False
+    face_recognition_enabled: bool = False
+    gesture_recognition_enabled: bool = False
+
+
+@dataclass(frozen=True)
+class UserRecognized(Event):
+    """Authorized local biometric profile recognized (greeting signal only)."""
+
+    profile_id: str = ""
+    display_name: str = ""
+    confidence: float = 0.0
+    recognized_at: float = 0.0
+
+
+@dataclass(frozen=True)
+class PresenceLost(Event):
+    """Previously present user is no longer detected."""
+
+    last_seen_at: float = 0.0
+    elapsed_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class AutoLockTriggered(Event):
+    """Vision auto-lock engaged after sustained absence."""
+
+    reason: str = "presence_lost"
+
+
+@dataclass(frozen=True)
+class GestureRecognized(Event):
+    """Debounced hand gesture recognized (UI controller enforces permissions)."""
+
+    gesture: str = ""
+    action: str = ""
+    confidence: float = 0.0

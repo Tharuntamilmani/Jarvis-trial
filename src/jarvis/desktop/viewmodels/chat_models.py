@@ -18,10 +18,19 @@ MAX_HISTORY_MESSAGES = 20
 MAX_HISTORY_CHARS = 12_000
 
 # Message status values shared by the controller and the view.
+STATUS_PENDING = "pending"
 STATUS_STREAMING = "streaming"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 STATUS_CANCELLED = "cancelled"
+STATUS_INTERRUPTED = "interrupted"
+
+# Statuses that must never be supplied to a provider as a finished answer.
+# ``pending`` and ``interrupted`` were added in Stage 2.8; ``interrupted``
+# content is a preserved partial response, not a completed assistant turn.
+NON_HISTORY_STATUSES = frozenset(
+    {STATUS_PENDING, STATUS_STREAMING, STATUS_INTERRUPTED}
+)
 
 
 @dataclass
@@ -41,7 +50,11 @@ class ConversationMessage:
     model: str = ""
     privacy: str = ""
     error: str = ""
+    # Machine-readable category kept separate from the human-readable detail
+    # above (Stage 2.8). Only the category is ever persisted.
+    error_category: str = ""
     tokens_used: int = 0
+    request_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -86,7 +99,7 @@ def build_local_history(
         for message in messages
         if message.role in ("user", "assistant")
         and message.content.strip()
-        and message.status != STATUS_STREAMING
+        and message.status not in NON_HISTORY_STATUSES
     ][-MAX_HISTORY_MESSAGES:]
     if not eligible:
         return []

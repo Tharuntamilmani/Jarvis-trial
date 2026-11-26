@@ -1,20 +1,30 @@
-"""Theme: palette constants and QSS builder for JARVIS."""
+"""Theme: Obsidian Telemetry palette constants and complete QSS builder for JARVIS."""
 
 from __future__ import annotations
 
-# Palette — deep space navy with cyan/amber sci-fi accents.
-BG_DEEP = "#060b14"
-BG_PANEL = "rgba(13, 23, 41, 200)"
-BG_PANEL_SOLID = "#0d1729"
-BG_CHIP = "rgba(20, 36, 63, 220)"
-ACCENT = "#00d4ff"
-ACCENT_DIM = "#0a7ea4"
-ACCENT_WARN = "#ffb020"
-ACCENT_DANGER = "#ff4d5e"
-ACCENT_OK = "#39d98a"
-TEXT_PRIMARY = "#e8f1ff"
-TEXT_MUTED = "#7f95b2"
-BORDER = "rgba(0, 212, 255, 60)"
+# Palette — Obsidian Telemetry: deep slate surfaces with quiet hairline borders
+# and crisp sky-cyan focus accents.
+BG_DEEP = "#090d14"
+BG_SURFACE = "#0f1520"
+BG_ELEVATED = "#151d2c"
+BG_RECESSED = "#070a10"
+BG_PANEL = "rgba(15, 21, 32, 228)"
+BG_PANEL_SOLID = "#0f1520"
+BG_CHIP = "rgba(21, 29, 44, 230)"
+
+ACCENT = "#38bdf8"
+ACCENT_DIM = "#0284c7"
+ACCENT_WARN = "#fbbf24"
+ACCENT_DANGER = "#f87171"
+ACCENT_OK = "#34d399"
+
+TEXT_PRIMARY = "#eef2f7"
+TEXT_MUTED = "#8b9bb4"
+TEXT_SUBTLE = "#5c6d87"
+
+BORDER = "rgba(148, 163, 184, 36)"
+BORDER_STRONG = "rgba(148, 163, 184, 68)"
+BORDER_ACCENT = "rgba(56, 189, 248, 130)"
 
 
 def build_qss() -> str:
@@ -22,86 +32,262 @@ def build_qss() -> str:
     return f"""
 QWidget {{
     color: {TEXT_PRIMARY};
-    font-family: 'Segoe UI Variable', 'Segoe UI';
+    font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
     font-size: 13px;
     background: transparent;
-    selection-background-color: {ACCENT_DIM};
+    selection-background-color: rgba(56, 189, 248, 70);
+    selection-color: {TEXT_PRIMARY};
 }}
 
 QMainWindow, #HudRoot, #WorkspaceRoot, #FloatingRoot {{
     background: {BG_DEEP};
 }}
 
+/* -- Typography & Headers -------------------------------------------------- */
+
 QLabel#HudTitle {{
-    font-size: 34px;
+    font-size: 28px;
     font-weight: 600;
-    letter-spacing: 8px;
+    letter-spacing: 6px;
     color: {TEXT_PRIMARY};
 }}
 
 QLabel#HudSubtitle {{
     color: {TEXT_MUTED};
     font-size: 11px;
-    letter-spacing: 4px;
+    letter-spacing: 2px;
+}}
+
+QLabel#HudTelemetry {{
+    color: {TEXT_MUTED};
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 11px;
+    background: rgba(15, 21, 32, 180);
+    border: 1px solid {BORDER};
+    border-radius: 12px;
+    padding: 5px 14px;
 }}
 
 QLabel#SectionTitle {{
-    font-size: 15px;
+    font-size: 12px;
     font-weight: 600;
-    color: {ACCENT};
+    letter-spacing: 1.5px;
+    color: {TEXT_MUTED};
 }}
+
+/* -- Surfaces & Containers ------------------------------------------------- */
 
 QFrame#GlassPanel {{
     background: {BG_PANEL};
     border: 1px solid {BORDER};
-    border-radius: 10px;
+    border-radius: 12px;
 }}
 
 QFrame#StatusChip {{
-    background: {BG_CHIP};
+    background: {BG_ELEVATED};
     border: 1px solid {BORDER};
-    border-radius: 6px;
+    border-radius: 8px;
 }}
 
-QPushButton {{
-    background: {BG_CHIP};
+QGroupBox {{
+    background: {BG_PANEL};
     border: 1px solid {BORDER};
-    border-radius: 6px;
+    border-radius: 10px;
+    margin-top: 14px;
+    padding: 14px 12px 12px 12px;
+    font-weight: 600;
+    color: {TEXT_PRIMARY};
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 12px;
+    padding: 0 6px;
+    color: {ACCENT};
+    font-size: 11px;
+    letter-spacing: 1px;
+}}
+
+/* -- Buttons --------------------------------------------------------------- */
+
+QPushButton {{
+    background: {BG_ELEVATED};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 7px;
     padding: 6px 14px;
+    color: {TEXT_PRIMARY};
+    font-weight: 500;
 }}
 QPushButton:hover {{
-    background: rgba(0, 212, 255, 40);
-    border-color: {ACCENT};
+    background: #1c273b;
+    border-color: {BORDER_ACCENT};
 }}
+QPushButton:pressed {{
+    background: #111827;
+}}
+QPushButton:disabled {{
+    color: {TEXT_SUBTLE};
+    border-color: {BORDER};
+    background: rgba(15, 21, 32, 140);
+}}
+
 QPushButton#NavButton {{
     text-align: left;
     padding: 10px 16px;
     border: none;
     border-radius: 8px;
     color: {TEXT_MUTED};
+    background: transparent;
 }}
 QPushButton#NavButton:checked {{
-    background: rgba(0, 212, 255, 35);
+    background: rgba(56, 189, 248, 26);
     color: {TEXT_PRIMARY};
     border-left: 2px solid {ACCENT};
 }}
+
 QPushButton#DangerButton {{
-    border-color: {ACCENT_DANGER};
+    background: rgba(248, 113, 113, 20);
+    border: 1px solid rgba(248, 113, 113, 110);
     color: {ACCENT_DANGER};
 }}
 QPushButton#DangerButton:hover {{
-    background: rgba(255, 77, 94, 40);
+    background: rgba(248, 113, 113, 42);
+    border-color: {ACCENT_DANGER};
 }}
 
-QLineEdit {{
-    background: rgba(6, 11, 20, 220);
+QPushButton#IconButton {{
+    background: transparent;
+    border: none;
+    color: {TEXT_MUTED};
+    font-size: 12px;
+    min-width: 18px;
+    padding: 2px 6px;
+    border-radius: 5px;
+}}
+QPushButton#IconButton:hover {{
+    color: {ACCENT};
+    background: rgba(56, 189, 248, 18);
+}}
+
+QPushButton#GhostButton {{
+    background: transparent;
     border: 1px solid {BORDER};
-    border-radius: 6px;
-    padding: 7px 12px;
+    color: {TEXT_MUTED};
+    padding: 6px 12px;
+    border-radius: 7px;
+}}
+QPushButton#GhostButton:hover {{
+    color: {TEXT_PRIMARY};
+    background: rgba(148, 163, 184, 18);
+    border-color: {BORDER_STRONG};
+}}
+
+QPushButton#AccentButton {{
+    background: rgba(56, 189, 248, 36);
+    border: 1px solid {ACCENT};
+    color: #f0f9ff;
+    font-weight: 600;
+    padding: 7px 18px;
+    border-radius: 8px;
+}}
+QPushButton#AccentButton:hover {{
+    background: rgba(56, 189, 248, 60);
+}}
+QPushButton#AccentButton:disabled {{
+    color: {TEXT_SUBTLE};
+    border-color: {BORDER};
+    background: {BG_SURFACE};
+}}
+
+/* -- Form Inputs, Combos, Checkboxes & Tables ------------------------------ */
+
+QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox {{
+    background: {BG_RECESSED};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 8px;
+    padding: 7px 11px;
     color: {TEXT_PRIMARY};
 }}
-QLineEdit:focus {{
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
+QSpinBox:focus, QDoubleSpinBox:focus {{
     border-color: {ACCENT};
+}}
+QLineEdit:disabled, QPlainTextEdit:disabled, QTextEdit:disabled {{
+    color: {TEXT_SUBTLE};
+    border-color: {BORDER};
+    background: rgba(7, 10, 16, 140);
+}}
+
+QComboBox {{
+    background: {BG_RECESSED};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 8px;
+    padding: 6px 12px;
+    color: {TEXT_PRIMARY};
+    min-height: 20px;
+}}
+QComboBox:hover {{
+    border-color: {BORDER_ACCENT};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 24px;
+}}
+QComboBox QAbstractItemView {{
+    background: {BG_ELEVATED};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 8px;
+    color: {TEXT_PRIMARY};
+    selection-background-color: rgba(56, 189, 248, 45);
+    padding: 4px;
+    outline: none;
+}}
+
+QCheckBox {{
+    spacing: 8px;
+    color: {TEXT_PRIMARY};
+}}
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid {BORDER_STRONG};
+    background: {BG_RECESSED};
+}}
+QCheckBox::indicator:checked {{
+    background: {ACCENT};
+    border-color: {ACCENT};
+}}
+
+QTableWidget, QTreeWidget {{
+    background: {BG_SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    gridline-color: {BORDER};
+    outline: none;
+}}
+QHeaderView::section {{
+    background: {BG_ELEVATED};
+    color: {TEXT_MUTED};
+    border: none;
+    border-bottom: 1px solid {BORDER};
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 600;
+}}
+
+QProgressBar {{
+    background: {BG_RECESSED};
+    border: 1px solid {BORDER};
+    border-radius: 5px;
+    text-align: center;
+    color: {TEXT_PRIMARY};
+    font-size: 10px;
+    min-height: 10px;
+}}
+QProgressBar::chunk {{
+    background: {ACCENT};
+    border-radius: 4px;
 }}
 
 QListWidget, QStackedWidget {{
@@ -111,37 +297,67 @@ QListWidget, QStackedWidget {{
 
 QScrollBar:vertical {{
     background: transparent;
-    width: 8px;
+    width: 7px;
+    margin: 2px 0;
 }}
 QScrollBar::handle:vertical {{
-    background: {ACCENT_DIM};
-    border-radius: 4px;
+    background: rgba(148, 163, 184, 70);
+    border-radius: 3px;
     min-height: 30px;
 }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+QScrollBar::handle:vertical:hover {{
+    background: {ACCENT_DIM};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
     height: 0;
+    background: transparent;
 }}
 
-/* -- Workspace shell (Stage 2.6) ------------------------------------------ */
+QToolTip {{
+    background: {BG_ELEVATED};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+}}
+
+QMenu {{
+    background: {BG_ELEVATED};
+    color: {TEXT_PRIMARY};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 8px;
+    padding: 4px;
+}}
+QMenu::item {{
+    padding: 6px 18px;
+    border-radius: 5px;
+}}
+QMenu::item:selected {{
+    background: rgba(56, 189, 248, 40);
+}}
+
+/* -- Workspace shell ------------------------------------------------------- */
 
 QFrame#WorkspaceSidebar {{
-    background: #081120;
+    background: {BG_SURFACE};
     border-right: 1px solid {BORDER};
 }}
 QLabel#SidebarBrand {{
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 700;
-    letter-spacing: 6px;
+    letter-spacing: 5px;
     color: {TEXT_PRIMARY};
 }}
 QLabel#SidebarCaption {{
     color: {TEXT_MUTED};
-    font-size: 9px;
-    letter-spacing: 2px;
+    font-size: 10px;
+    letter-spacing: 1.5px;
 }}
 QPushButton#NewChatButton {{
-    background: rgba(0, 212, 255, 28);
-    border: 1px solid rgba(0, 212, 255, 90);
+    background: rgba(56, 189, 248, 24);
+    border: 1px solid {BORDER_ACCENT};
     border-radius: 8px;
     color: {ACCENT};
     text-align: left;
@@ -149,26 +365,31 @@ QPushButton#NewChatButton {{
     font-weight: 600;
 }}
 QPushButton#NewChatButton:hover {{
-    background: rgba(0, 212, 255, 48);
+    background: rgba(56, 189, 248, 44);
 }}
 QPushButton#NewChatButton:disabled {{
-    color: {TEXT_MUTED};
+    color: {TEXT_SUBTLE};
     border-color: {BORDER};
     background: transparent;
 }}
 QListWidget#ConversationList {{
-    background: rgba(13, 23, 41, 120);
+    background: {BG_RECESSED};
     border: 1px solid {BORDER};
     border-radius: 8px;
     padding: 4px;
+    outline: none;
 }}
 QListWidget#ConversationList::item {{
     color: {TEXT_MUTED};
-    padding: 5px 8px;
+    padding: 6px 9px;
     border-radius: 6px;
 }}
+QListWidget#ConversationList::item:hover {{
+    background: rgba(148, 163, 184, 14);
+    color: {TEXT_PRIMARY};
+}}
 QListWidget#ConversationList::item:selected {{
-    background: rgba(0, 212, 255, 20);
+    background: rgba(56, 189, 248, 28);
     color: {TEXT_PRIMARY};
 }}
 QListWidget#NavList {{
@@ -183,108 +404,72 @@ QListWidget#NavList::item {{
     margin: 1px 0;
 }}
 QListWidget#NavList::item:hover {{
-    background: rgba(0, 212, 255, 12);
+    background: rgba(148, 163, 184, 14);
     color: {TEXT_PRIMARY};
 }}
 QListWidget#NavList::item:selected {{
-    background: rgba(0, 212, 255, 30);
+    background: rgba(56, 189, 248, 24);
     color: {TEXT_PRIMARY};
     border-left: 2px solid {ACCENT};
 }}
 QFrame#ProviderPanel {{
-    background: rgba(13, 23, 41, 180);
+    background: {BG_ELEVATED};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: 10px;
 }}
 QLabel#ProviderName {{
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 500;
     color: {TEXT_PRIMARY};
 }}
 QLabel#ProviderDetail {{
     font-size: 10px;
     color: {TEXT_MUTED};
 }}
-QPushButton#IconButton {{
-    background: transparent;
-    border: none;
-    color: {TEXT_MUTED};
-    font-size: 14px;
-    min-width: 18px;
-    padding: 0;
-}}
-QPushButton#IconButton:hover {{
-    color: {ACCENT};
-}}
-QPushButton#GhostButton {{
-    background: transparent;
-    border: 1px solid {BORDER};
-    color: {TEXT_MUTED};
-    padding: 6px 10px;
-}}
-QPushButton#GhostButton:hover {{
-    color: {TEXT_PRIMARY};
-    border-color: {ACCENT};
-}}
-QPushButton#AccentButton {{
-    background: rgba(0, 212, 255, 40);
-    border: 1px solid {ACCENT};
-    color: #eaffff;
-    font-weight: 600;
-    padding: 7px 18px;
-    border-radius: 7px;
-}}
-QPushButton#AccentButton:hover {{
-    background: rgba(0, 212, 255, 65);
-}}
-QPushButton#AccentButton:disabled {{
-    color: {TEXT_MUTED};
-    border-color: {BORDER};
-    background: rgba(13, 23, 41, 160);
-}}
-QPushButton:disabled {{
-    color: {TEXT_MUTED};
-}}
 QLabel#PlaceholderText {{
     color: {TEXT_MUTED};
 }}
 
-/* -- Chat surface ----------------------------------------------------------- */
+/* -- Chat surface ---------------------------------------------------------- */
 
 QWidget#ChatRoot {{
     background: {BG_DEEP};
 }}
 QFrame#ChatHeader {{
-    background: rgba(8, 15, 28, 210);
+    background: {BG_SURFACE};
     border-bottom: 1px solid {BORDER};
 }}
 QLabel#ChatTitle {{
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 600;
     color: {TEXT_PRIMARY};
 }}
 QLabel#ChatSubtitle {{
     color: {TEXT_MUTED};
-    font-size: 9px;
-    letter-spacing: 3px;
+    font-size: 10px;
+    letter-spacing: 2px;
 }}
 QLabel#AssistantStatus {{
     color: {TEXT_MUTED};
     font-size: 10px;
-    letter-spacing: 2px;
+    letter-spacing: 1.5px;
 }}
 QLabel#ProviderPill {{
-    border: 1px solid {BORDER};
-    border-radius: 9px;
-    padding: 2px 9px;
-    font-size: 10px;
+    background: rgba(56, 189, 248, 16);
+    border: 1px solid {BORDER_ACCENT};
+    border-radius: 10px;
+    padding: 3px 10px;
+    font-size: 11px;
     color: {ACCENT};
 }}
 QLabel#DangerPill {{
+    background: rgba(248, 113, 113, 20);
     color: {ACCENT_DANGER};
     border: 1px solid {ACCENT_DANGER};
-    border-radius: 9px;
-    padding: 2px 8px;
-    font-size: 9px;
+    border-radius: 10px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 600;
     letter-spacing: 1px;
 }}
 QScrollArea#ChatScroll {{
@@ -295,25 +480,24 @@ QWidget#MessagesContainer {{
     background: transparent;
 }}
 QFrame#UserBubble {{
-    background: rgba(0, 120, 170, 55);
-    border: 1px solid rgba(0, 212, 255, 70);
-    border-radius: 12px;
+    background: #12263e;
+    border: 1px solid rgba(56, 189, 248, 72);
+    border-radius: 14px;
 }}
 QFrame#AssistantBubble {{
-    background: rgba(13, 23, 41, 225);
-    border: 1px solid rgba(127, 149, 178, 45);
-    border-radius: 12px;
+    background: {BG_SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 14px;
 }}
 QLabel#BubbleAuthor {{
     color: {TEXT_MUTED};
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 600;
-    letter-spacing: 2px;
+    letter-spacing: 1.5px;
 }}
 QLabel#BubbleOrigin {{
-    color: {ACCENT_DIM};
-    font-size: 9px;
-    letter-spacing: 1px;
+    color: {ACCENT};
+    font-size: 10px;
 }}
 QLabel#BubbleContent {{
     color: {TEXT_PRIMARY};
@@ -324,41 +508,41 @@ QLabel#BubbleMeta {{
     font-size: 10px;
 }}
 QPushButton#LatestButton {{
-    background: rgba(13, 23, 41, 235);
-    border: 1px solid {ACCENT};
-    border-radius: 12px;
+    background: {BG_ELEVATED};
+    border: 1px solid {BORDER_ACCENT};
+    border-radius: 14px;
     color: {ACCENT};
-    padding: 4px 12px;
+    padding: 5px 14px;
     font-size: 11px;
 }}
 QPushButton#LatestButton:hover {{
-    background: rgba(0, 212, 255, 40);
+    background: rgba(56, 189, 248, 35);
 }}
 QLabel#WelcomeTitle {{
     color: {TEXT_PRIMARY};
-    font-size: 30px;
+    font-size: 28px;
     font-weight: 600;
-    letter-spacing: 8px;
+    letter-spacing: 6px;
 }}
 QLabel#WelcomeSubtitle {{
     color: {TEXT_MUTED};
-    font-size: 12px;
-    max-width: 560px;
+    font-size: 13px;
+    max-width: 540px;
 }}
 QLabel#WelcomeHint {{
-    color: {ACCENT_DIM};
-    font-size: 10px;
-    letter-spacing: 2px;
+    color: {ACCENT};
+    font-size: 11px;
+    letter-spacing: 1.5px;
 }}
 QFrame#ComposerPanel {{
-    background: rgba(8, 15, 28, 215);
+    background: {BG_SURFACE};
     border-top: 1px solid {BORDER};
 }}
 QTextEdit#ComposerInput {{
-    background: rgba(6, 11, 20, 235);
-    border: 1px solid rgba(0, 212, 255, 55);
-    border-radius: 10px;
-    padding: 10px 12px;
+    background: {BG_RECESSED};
+    border: 1px solid {BORDER_STRONG};
+    border-radius: 12px;
+    padding: 10px 14px;
     color: {TEXT_PRIMARY};
     font-size: 13px;
 }}
@@ -374,46 +558,46 @@ QLabel#ComposerError {{
     font-size: 11px;
 }}
 
-/* -- Cloud consent overlay -------------------------------------------------- */
+/* -- Cloud consent & approval overlays ------------------------------------- */
 
 QFrame#ConsentBackdrop {{
-    background: rgba(2, 5, 10, 215);
+    background: rgba(4, 7, 12, 215);
 }}
 QFrame#ConsentCard {{
-    background: {BG_PANEL_SOLID};
-    border: 1px solid rgba(255, 176, 32, 110);
-    border-radius: 14px;
+    background: {BG_SURFACE};
+    border: 1px solid rgba(251, 191, 36, 120);
+    border-radius: 16px;
 }}
 QLabel#ConsentTitle {{
     color: {ACCENT_WARN};
     font-size: 15px;
     font-weight: 700;
-    letter-spacing: 2px;
+    letter-spacing: 1.5px;
 }}
 QLabel#ConsentSubtitle {{
     color: {TEXT_PRIMARY};
-    font-size: 11px;
+    font-size: 12px;
 }}
 QLabel#ConsentKey {{
     color: {TEXT_MUTED};
-    font-size: 9px;
-    letter-spacing: 2px;
+    font-size: 10px;
+    letter-spacing: 1.5px;
 }}
 QLabel#ConsentValue {{
     color: {TEXT_PRIMARY};
-    font-size: 11px;
+    font-size: 12px;
 }}
 QLabel#ConsentNote {{
     color: {TEXT_MUTED};
-    font-size: 10px;
+    font-size: 11px;
 }}
 QPlainTextEdit#ConsentText {{
-    background: rgba(6, 11, 20, 235);
+    background: {BG_RECESSED};
     border: 1px solid {BORDER};
-    border-radius: 6px;
-    color: #cfe3ff;
-    font-family: 'Cascadia Mono', 'Consolas';
-    font-size: 10px;
-    padding: 6px;
+    border-radius: 8px;
+    color: #dbeafe;
+    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 11px;
+    padding: 8px;
 }}
 """

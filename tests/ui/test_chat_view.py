@@ -21,6 +21,7 @@ from jarvis.intelligence.cloud_payload import build_cloud_payload
 from jarvis.intelligence.consent import ConsentManager
 from jarvis.intelligence.prompts import JARVIS_SYSTEM_PROMPT
 from jarvis.intelligence.providers.base import ChatMessage, ChatRequest
+from tests.ui.chat_test_helpers import StubConversationPersistence
 from tests.unit.chat_helpers import chat_settings
 
 
@@ -77,6 +78,7 @@ def _controller(
     service: FakeChatService | None = None,
     consent: ConsentManager | None = None,
     source: FakeProviderSource | None = None,
+    conversations=None,
 ):
     state = AppState()
     controller = ChatController(
@@ -84,6 +86,7 @@ def _controller(
         service or FakeChatService(),
         consent,
         provider_source=source,
+        conversations=conversations or StubConversationPersistence(),
     )
     return state, controller
 

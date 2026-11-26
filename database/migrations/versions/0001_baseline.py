@@ -96,8 +96,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.execute(
-        f"CREATE INDEX ix_memories_embedding_hnsw ON memories "
-        f"USING hnsw (embedding vector_cosine_ops)"
+        "CREATE INDEX ix_memories_embedding_hnsw ON memories"
+        " USING hnsw (embedding vector_cosine_ops)"
     )
 
     # episodes (episodic, tier 5)
@@ -112,8 +112,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.execute(
-        f"CREATE INDEX ix_episodes_embedding_hnsw ON episodes "
-        f"USING hnsw (embedding vector_cosine_ops)"
+        "CREATE INDEX ix_episodes_embedding_hnsw ON episodes"
+        " USING hnsw (embedding vector_cosine_ops)"
     )
 
     # user_preferences (tier 6)

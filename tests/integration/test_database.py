@@ -1,70 +1,26 @@
 """Database integration tests.
 
-Run against a real PostgreSQL+pgvector. Skipped automatically when no
-database is reachable at ``JARVIS_TEST_DATABASE_URL`` (default: the dev
-container on localhost:5433).
+Run against the dedicated ``jarvis_test`` database only. The fixtures in
+``tests/integration/conftest.py`` assert ``SELECT current_database()`` before
+any destructive operation, so these tests can never touch the development
+database. When no test database is reachable the whole module is skipped.
 """
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
-TEST_URL = os.environ.get(
-    "JARVIS_TEST_DATABASE_URL",
-    "postgresql+asyncpg://jarvis:jarvis@localhost:5433/jarvis",
-)
+pytestmark = pytest.mark.usefixtures("migrated_database")
 
 
-def _database_available() -> bool:
-    import asyncio
-
-    import asyncpg
-
-    async def probe() -> bool:
-        try:
-            conn = await asyncpg.connect(
-                TEST_URL.replace("+asyncpg", ""), timeout=3
-            )
-            await conn.close()
-            return True
-        except Exception:  # noqa: BLE001
-            return False
-
-    try:
-        return asyncio.run(asyncio.wait_for(probe(), timeout=5))
-    except Exception:  # noqa: BLE001
-        return False
+async def test_health_check(db_service) -> None:
+    assert await db_service.health_check() is True
 
 
-pytestmark = pytest.mark.skipif(
-    not _database_available(), reason="no PostgreSQL available for tests"
-)
-
-
-@pytest.fixture()
-def db():
-    from jarvis.config import Settings
-    from jarvis.core.event_bus import EventBus
-    from jarvis.database.connection import DatabaseService
-
-    settings = Settings(database_url=TEST_URL, _env_file=None)  # type: ignore[call-arg]
-    service = DatabaseService(settings, EventBus())
-    service.connect()
-    return service
-
-
-@pytest.mark.asyncio
-async def test_health_check(db) -> None:
-    assert await db.health_check() is True
-
-
-@pytest.mark.asyncio
-async def test_schema_present(db) -> None:
+async def test_schema_present(db_service) -> None:
     from sqlalchemy import text
 
-    async with db.session() as session:
+    async with db_service.session() as session:
         rows = (
             await session.execute(
                 text(
@@ -88,13 +44,12 @@ async def test_schema_present(db) -> None:
     assert expected <= tables
 
 
-@pytest.mark.asyncio
-async def test_vector_insert_and_select(db) -> None:
+async def test_vector_insert_and_select(db_service) -> None:
     """VECTOR(1024) round trip through the ORM type."""
     from sqlalchemy import text
 
     vec = "[" + ",".join(["0.1"] * 1024) + "]"
-    async with db.session() as session:
+    async with db_service.session() as session:
         result = await session.execute(
             text(
                 "INSERT INTO memories (content, embedding, source) "
@@ -120,16 +75,12 @@ async def test_vector_insert_and_select(db) -> None:
     assert row[2] == "test"
 
 
-@pytest.mark.asyncio
-async def test_audit_log_is_append_only(db) -> None:
+async def test_audit_log_is_append_only(db_service) -> None:
     from sqlalchemy import text
 
-    async with db.session() as session:
+    async with db_service.session() as session:
         await session.execute(
-            text(
-                "INSERT INTO audit_log (action, result) "
-                "VALUES ('probe', 'ok')"
-            )
+            text("INSERT INTO audit_log (action, result) VALUES ('probe', 'ok')")
         )
         # UPDATE and DELETE are silently ignored by DB rules.
         await session.execute(text("UPDATE audit_log SET result='hacked'"))
@@ -137,9 +88,7 @@ async def test_audit_log_is_append_only(db) -> None:
             await session.execute(text("SELECT count(*) FROM audit_log"))
         ).scalar_one()
         assert count >= 1
-        await session.execute(
-            text("DELETE FROM audit_log WHERE action='probe'")
-        )
+        await session.execute(text("DELETE FROM audit_log WHERE action='probe'"))
         still = (
             await session.execute(
                 text("SELECT count(*) FROM audit_log WHERE action='probe'")

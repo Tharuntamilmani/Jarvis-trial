@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
 
 from jarvis.config import Settings
+from jarvis.monitoring.logging import reset_logging
+
+
+@pytest.fixture(autouse=True)
+def _isolate_jarvis_logger():
+    """Prevent setup_logging() in one test from breaking caplog in later tests."""
+    yield
+    reset_logging()
+    logging.getLogger("jarvis").propagate = True
 
 
 @pytest.fixture()

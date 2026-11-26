@@ -197,9 +197,17 @@ and tray-only operation.
   first Workspace show performs one real health refresh, the sidebar has a
   manual Refresh button, health events update the UI, and there is no
   background polling.
-- **Shutdown order:** set closing → deny/lock pending consent → cancel UI
-  dispatch → cancel the active chat request → clear pending UI state →
-  detach the responder → shut down the core → close windows → quit.
+- **Shutdown order:** set closing → deny/lock pending consent → snapshot the
+  active request ID → cancel UI dispatch → cancel the service request using
+  the snapshot → clear pending UI state → detach the responder → shut down
+  the core → close windows → quit. The snapshot keeps cancellation
+  deterministic even when `start_chat` was still awaiting registration.
+- **Status hydration:** windows created after core startup read the current
+  `AppState.service_statuses` snapshot, so the engine, database, providers,
+  and kill-switch chips never start as `unknown`.
+- **Provider chip:** `AppState` aggregates provider health into one shared
+  `providers` status (`N/M available`); individual provider rows remain
+  driven by `ProviderHealthChanged`.
 
 ## 4. Memory Architecture — Six Explicit Tiers
 
@@ -273,6 +281,13 @@ Three modes, one engine, one shared state.
   restarted or reloaded; streams, voice and timers continue even with zero
   windows open (tray-only mode). Closing all windows minimizes to tray;
   quitting is possible only from the tray.
+- **Cross-mode shortcuts:** the HUD `F` key opens Floating mode. A floating
+  quick command is routed through the app-owned `ChatController.send()`
+  path and then opens the Workspace; it never executes shell commands,
+  calls providers directly, or bypasses chat privacy controls.
+- **Kill-switch indicators:** engaging Emergency Stop updates the
+  `kill_switch` service status and every mode's orb/label; re-arming
+  restores the current assistant state.
 
 ## 7. Database Architecture
 

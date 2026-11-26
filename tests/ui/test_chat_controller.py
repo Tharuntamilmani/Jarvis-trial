@@ -13,7 +13,7 @@ from jarvis.desktop.viewmodels.chat_models import (
     STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_FAILED,
-    STATUS_STREAMING,
+    STATUS_PENDING,
     ConversationMessage,
 )
 from jarvis.intelligence.chat_service import CancelOutcome
@@ -21,6 +21,7 @@ from jarvis.intelligence.cloud_payload import build_cloud_payload
 from jarvis.intelligence.consent import ConsentManager
 from jarvis.intelligence.prompts import JARVIS_SYSTEM_PROMPT
 from jarvis.intelligence.providers.base import ChatMessage, ChatRequest
+from tests.ui.chat_test_helpers import StubConversationPersistence
 
 
 class FakeChatService:
@@ -99,6 +100,7 @@ def _controller(
     service: FakeChatService | None = None,
     consent: ConsentManager | None = None,
     source: FakeProviderSource | None = None,
+    conversations=None,
     request_id_factory=None,
     clock=None,
 ) -> ChatController:
@@ -108,6 +110,7 @@ def _controller(
         service or FakeChatService(),
         consent,
         provider_source=source,
+        conversations=conversations or StubConversationPersistence(),
         request_id_factory=request_id_factory,
         clock=clock,
     )
@@ -135,7 +138,7 @@ async def test_send_creates_one_user_and_one_assistant_message() -> None:
     assert controller.busy is True
     assert [m.role for m in controller.messages] == ["user", "assistant"]
     assert controller.messages[0].content == "hello JARVIS"
-    assert controller.messages[1].status == STATUS_STREAMING
+    assert controller.messages[1].status == STATUS_PENDING
 
     await controller.wait_idle()
     assert len(service.starts) == 1
@@ -157,7 +160,11 @@ async def test_whitespace_only_and_duplicate_sends_are_rejected() -> None:
 
 
 async def test_send_fails_safely_when_service_is_unavailable() -> None:
-    controller = ChatController(AppState(), None)
+    controller = ChatController(
+        AppState(),
+        None,
+        conversations=StubConversationPersistence(),
+    )
     errors: list[str] = []
     controller.error_occurred.connect(errors.append)
     assert controller.send("hello") is None
@@ -521,6 +528,26 @@ async def test_completed_conversation_is_retained_for_reopen() -> None:
     state.apply_chat_stream_completed(rid, "hi there", 2)
 
     assert [m.content for m in controller.messages] == ["hello", "hi there"]
+
+
+async def test_shutdown_cancels_request_while_dispatch_is_pending() -> None:
+    service = FakeChatService()
+    service.gate = asyncio.Event()
+    controller = _controller(
+        service=service, request_id_factory=lambda: "pending-request"
+    )
+
+    rid = controller.send("hello")
+    await asyncio.sleep(0)  # dispatch started and is awaiting the gate
+    assert controller._dispatch_task is not None  # noqa: SLF001
+    assert not controller._dispatch_task.done()  # noqa: SLF001
+
+    await controller.shutdown()
+    await controller.shutdown()  # idempotent
+
+    assert service.cancels == [rid]
+    assert controller.active_request_id is None
+    assert controller.busy is False
 
 
 async def test_shutdown_during_streaming_is_clean() -> None:

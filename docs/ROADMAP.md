@@ -56,6 +56,10 @@ Workspace; privacy policy enforced and tested.
   bubbles, composer/stop, inline cloud-consent card, provider status,
   in-memory conversation surviving window close/reopen, async Qt wiring
   and deterministic shutdown).
+- [x] Stage 2.7 — integration and stabilization: Emergency Stop wiring,
+  status hydration/aggregation, HUD `F` and floating quick-command routing,
+  provider stream cleanup, deterministic shutdown cancellation, and
+  repository-wide lint.
 
 ## Phase 3 — Memory
 

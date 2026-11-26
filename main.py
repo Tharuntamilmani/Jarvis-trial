@@ -19,19 +19,34 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
     import qasync
 
     from jarvis.desktop.application import DesktopApplication
     from jarvis.monitoring.logging import get_logger, setup_logging
     from jarvis.config import get_settings
 
+    parser = argparse.ArgumentParser(description="JARVIS AI Desktop Assistant")
+    parser.add_argument(
+        "--safe-mode",
+        action="store_true",
+        help="Start with voice, vision, agents, and tools disabled for recovery",
+    )
+    args = parser.parse_args(argv)
+
     settings = get_settings()
     setup_logging(level=settings.log_level, log_dir=settings.log_dir)
     log = get_logger("entrypoint")
-    log.info("JARVIS starting (phase 1)")
+    log.info("JARVIS starting (safe_mode=%s)", args.safe_mode)
 
-    app = DesktopApplication.create()
+    app = DesktopApplication.create(
+        safe_mode=args.safe_mode, enforce_single_instance=True
+    )
+    if not app.instance_lock.acquire():
+        log.warning("another JARVIS instance is already running; exiting")
+        return 1
 
     loop = qasync.QEventLoop(app.app)
     asyncio.set_event_loop(loop)
