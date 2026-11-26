@@ -53,21 +53,49 @@ class WindowManager(QObject):
         self,
         state: AppState,
         chat_controller=None,
+        voice_controller=None,
+        vision_controller=None,
+        security_controller=None,
+        preferences_service=None,
     ) -> None:
         super().__init__()
         self._state = state
         self._chat_controller = chat_controller
+        self._voice_controller = voice_controller
+        self._vision_controller = vision_controller
+        self._security_controller = security_controller
+        self._preferences_service = preferences_service
         self._windows: dict[str, QWidget] = {}
 
     def attach_chat_controller(self, controller) -> None:
         """Attach the app-owned chat controller before windows are created."""
         self._chat_controller = controller
 
+    def attach_voice_controller(self, controller) -> None:
+        """Attach the app-owned voice controller before windows are created."""
+        self._voice_controller = controller
+
+    def attach_vision_controller(self, controller) -> None:
+        """Attach the app-owned vision controller before windows are created."""
+        self._vision_controller = controller
+
+    def attach_security_controller(self, controller) -> None:
+        """Attach the app-owned security controller before windows are created."""
+        self._security_controller = controller
+
+    def attach_preferences_service(self, service) -> None:
+        """Attach the app-owned preferences service before windows are created."""
+        self._preferences_service = service
+
     # -- Creation ----------------------------------------------------------------
 
     def _create(self, key: str) -> QWidget:
         if key == Mode.HUD:
-            window: QWidget = HudWindow(self._state)
+            window: QWidget = HudWindow(
+                self._state,
+                voice_controller=self._voice_controller,
+                vision_controller=self._vision_controller,
+            )
             window.hide_requested.connect(lambda: self.hide_window(Mode.HUD))
             window.switch_workspace_requested.connect(
                 lambda: self.switch_mode(Mode.WORKSPACE)
@@ -76,7 +104,14 @@ class WindowManager(QObject):
                 lambda: self.switch_mode(Mode.FLOATING)
             )
         elif key == Mode.WORKSPACE:
-            window = WorkspaceWindow(self._state, self._chat_controller)
+            window = WorkspaceWindow(
+                self._state,
+                self._chat_controller,
+                voice_controller=self._voice_controller,
+                vision_controller=self._vision_controller,
+                security_controller=self._security_controller,
+                preferences_service=self._preferences_service,
+            )
             window.show_hud_requested.connect(
                 lambda: self.switch_mode(Mode.HUD)
             )
@@ -91,7 +126,10 @@ class WindowManager(QObject):
                 else None
             )
             window = FloatingWindow(
-                self._state, command_handler=handler
+                self._state,
+                command_handler=handler,
+                voice_controller=self._voice_controller,
+                vision_controller=self._vision_controller,
             )
             window.expand_workspace_requested.connect(
                 lambda: self.switch_mode(Mode.WORKSPACE)

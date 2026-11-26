@@ -16,6 +16,7 @@ from jarvis.desktop.window_manager import Mode, WindowManager
 from jarvis.desktop.windows.floating_window import FloatingWindow
 from jarvis.desktop.windows.hud_window import HudWindow
 from jarvis.desktop.windows.workspace_window import WorkspaceWindow
+from tests.ui.chat_test_helpers import StubConversationPersistence
 
 
 @pytest.fixture()
@@ -252,6 +253,7 @@ async def test_floating_quick_command_routes_through_chat(qtbot, state) -> None:
         state,
         service,
         None,
+        conversations=StubConversationPersistence(),
         request_id_factory=lambda: "quick-request",
     )
     wm = WindowManager(state, controller)

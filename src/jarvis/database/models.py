@@ -14,6 +14,7 @@ import uuid
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -77,6 +78,12 @@ class Conversation(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # Stage 2.8: reorders the conversation list. Updated on a new turn and on
+    # rename — never on streaming checkpoints. Raw-SQL writers must set this
+    # explicitly: ``onupdate`` only applies to ORM updates.
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Message(Base):
@@ -92,6 +99,29 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     tokens: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # --- Stage 2.8 persistence ---------------------------------------------
+    # Deterministic ordering. Always ``ORDER BY seq``; never by timestamp.
+    seq: Mapped[int] = mapped_column(BigInteger)
+    # Logical turn identity shared by the original user+assistant pair. A
+    # retry is assistant-only and carries its own request ID.
+    request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # pending | streaming | completed | failed | cancelled | interrupted
+    status: Mapped[str] = mapped_column(String(20), default="completed")
+    # Safe machine-readable category only; human detail stays in the UI layer.
+    error: Mapped[str | None] = mapped_column(String(40))
+    provider: Mapped[str | None] = mapped_column(String(40))
+    model: Mapped[str | None] = mapped_column(String(120))
+    privacy: Mapped[str | None] = mapped_column(String(20))  # local | cloud
+    owner_session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Optimistic-concurrency guard for checkpoints and terminal writes.
+    content_version: Mapped[int] = mapped_column(Integer, default=0)
+    retry_of_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True)
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
@@ -174,10 +204,17 @@ class AgentRun(Base):
     agent: Mapped[str] = mapped_column(String(60))
     input: Mapped[str] = mapped_column(Text)
     output: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), default="running")
+    status: Mapped[str] = mapped_column(String(20), default="queued")
     duration_ms: Mapped[int | None] = mapped_column(Integer)
+    idempotency_key: Mapped[str | None] = mapped_column(String(120))
+    error_category: Mapped[str | None] = mapped_column(String(40))
+    owner_session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    parent_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 

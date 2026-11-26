@@ -44,8 +44,14 @@ class ProviderStatus:
 class CoreEngine:
     """Facade over the core service graph."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        safe_mode: bool = False,
+    ) -> None:
         self.settings = settings or get_settings()
+        self.safe_mode = bool(safe_mode)
         setup_logging(level=self.settings.log_level, log_dir=self.settings.log_dir)
         self.bus = EventBus()
         self.registry = ServiceRegistry()
@@ -83,16 +89,34 @@ class CoreEngine:
         self.registry.register(
             "credentials", lambda: CredentialStore(settings)
         )
-        self.registry.register(
-            "audit", lambda: AuditService(settings, self.bus)
-        )
+        from jarvis.config.preferences import PreferencesService
+
+        async def _build_preferences():
+            creds = await self.registry.get("credentials")
+            db = None
+            try:
+                db = await self.registry.get("database")
+            except Exception:  # noqa: BLE001
+                log.debug("preferences database unavailable; using defaults")
+            return PreferencesService(database=db, credentials=creds)
+
+        self.registry.register("preferences", _build_preferences)
+        async def _build_audit():
+            db = None
+            try:
+                db = await self.registry.get("database")
+            except Exception:  # noqa: BLE001 - local JSONL sink still works
+                log.debug("audit database unavailable; using JSONL sink")
+            return AuditService(settings, self.bus, database=db)
+
+        self.registry.register("audit", _build_audit)
         self.registry.register(
             "permissions", lambda: PermissionPolicy.default_policy()
         )
         self.registry.register("allowlist", lambda: CommandAllowlist())
         self.registry.register(
             "approval",
-            lambda: ApprovalService(settings, self.bus),
+            lambda: ApprovalService(settings, self.bus, lifecycle=self.lifecycle),
             cleanup=lambda svc: svc.close(),
         )
         self.registry.register(
@@ -142,12 +166,193 @@ class CoreEngine:
             cleanup=lambda svc: svc.close(),
         )
 
+        # Stage 2.8: durable conversation persistence. Resolved lazily so a
+        # database outage degrades this service instead of crashing startup.
+        from jarvis.conversations.service import ConversationService
+
+        async def _build_conversations():
+            database = await self.registry.get("database")
+            return ConversationService.from_database(database, settings)
+
+        self.registry.register(
+            "conversations",
+            _build_conversations,
+            cleanup=lambda svc: svc.close(),
+        )
+
+        # Phase 3: six-tier memory subsystem (local-only semantic retrieval).
+        from jarvis.memory.manager import MemoryManager
+
+        async def _build_memory():
+            database = await self.registry.get("database")
+            return MemoryManager.from_database(database, settings)
+
+        self.registry.register(
+            "memory",
+            _build_memory,
+            cleanup=lambda svc: svc.close(),
+        )
+
+        # Phase 4.1+: optional/autonomous subsystems (disabled in safe_mode).
+        if not self.safe_mode:
+            self._assemble_optional_subsystems(settings)
+
         self.lifecycle.set_health_check(
             "database", lambda: self._database_health()
         )
         self.lifecycle.set_health_check(
             "kill_switch", lambda: not self.lifecycle.kill_switch_active
         )
+
+    def _assemble_optional_subsystems(self, settings: Settings) -> None:
+        """Register agents, scheduler, voice, and vision (skipped in safe_mode)."""
+        from jarvis.agents.manager import AgentManager
+        from jarvis.agents.registry import AgentRegistry
+        from jarvis.agents.scheduler import ScheduledJobStore, TaskScheduler
+        from jarvis.security.biometrics import BiometricStore
+        from jarvis.vision import (
+            CameraDeviceManager,
+            GestureTracker,
+            InsightFaceRecognizer,
+            LocalFaceMatcher,
+            MediaPipeGestureEngine,
+            OpenCVCameraIO,
+            VisionService,
+        )
+        from jarvis.voice import (
+            AudioDeviceManager,
+            EnergyVAD,
+            FasterWhisperSTT,
+            OpenWakeWordEngine,
+            PiperTTSEngine,
+            SoundDeviceAudioIO,
+            SpeechSynthesizer,
+            SpeechTranscriber,
+            VoiceService,
+        )
+
+        agent_registry = AgentRegistry()
+        self.registry.register("agent_registry", lambda: agent_registry)
+
+        async def _build_agents():
+            from jarvis.agents.builtin import (
+                ChatAgent,
+                ResearchAgent,
+                SystemAgent,
+            )
+
+            database = await self.registry.get("database")
+            reg = await self.registry.get("agent_registry")
+            if not reg.has("system"):
+                reg.register(SystemAgent(self.lifecycle))
+            if not reg.has("chat"):
+                chat_svc = await self.registry.get("chat")
+                reg.register(ChatAgent(chat_svc, self.bus))
+            if not reg.has("research"):
+                mem_svc = await self.registry.get("memory")
+                reg.register(ResearchAgent(mem_svc))
+            return AgentManager.from_database(
+                database,
+                self.bus,
+                registry=reg,
+                lifecycle=self.lifecycle,
+            )
+
+        self.registry.register(
+            "agents",
+            _build_agents,
+            cleanup=lambda svc: svc.close(),
+        )
+
+        async def _build_scheduler():
+            database = await self.registry.get("database")
+            mgr = await self.registry.get("agents")
+            sched = TaskScheduler(
+                mgr,
+                ScheduledJobStore(database),
+                lifecycle=self.lifecycle,
+            )
+            await sched.load()
+            return sched
+
+        self.registry.register(
+            "scheduler",
+            _build_scheduler,
+            cleanup=lambda svc: svc.close(),
+        )
+
+        def _build_voice():
+            audio_io = SoundDeviceAudioIO()
+            return VoiceService(
+                audio_io=audio_io,
+                device_manager=AudioDeviceManager(audio_io, self.bus),
+                vad=EnergyVAD(),
+                transcriber=SpeechTranscriber(FasterWhisperSTT(), self.bus),
+                bus=self.bus,
+                wake_word=OpenWakeWordEngine(),
+                synthesizer=SpeechSynthesizer(
+                    PiperTTSEngine(), audio_io, self.bus
+                ),
+                lifecycle=self.lifecycle,
+            )
+
+        self.registry.register(
+            "voice",
+            _build_voice,
+            cleanup=lambda svc: svc.close(),
+        )
+
+        def _build_vision():
+            camera_io = OpenCVCameraIO()
+            biometrics = BiometricStore(settings=settings)
+            return VisionService(
+                camera_io=camera_io,
+                device_manager=CameraDeviceManager(camera_io, self.bus),
+                bus=self.bus,
+                biometrics=biometrics,
+                face_matcher=LocalFaceMatcher(InsightFaceRecognizer(), biometrics),
+                gesture_tracker=GestureTracker(MediaPipeGestureEngine()),
+                lifecycle=self.lifecycle,
+            )
+
+        self.registry.register(
+            "vision",
+            _build_vision,
+            cleanup=lambda svc: svc.close(),
+        )
+
+        # Phase 7.1-7.3: typed ToolRegistry and centralized ExecutionSandbox.
+        from jarvis.security.sandbox import ExecutionSandbox
+        from jarvis.tools import (
+            ToolRegistry,
+            register_clipboard_tools,
+            register_telemetry_tools,
+        )
+
+        def _build_tools():
+            reg = ToolRegistry()
+            register_telemetry_tools(reg)
+            register_clipboard_tools(reg)
+            return reg
+
+        self.registry.register("tools", _build_tools)
+
+        async def _build_sandbox():
+            reg = await self.registry.get("tools")
+            policy = await self.registry.get("permissions")
+            allowlist = await self.registry.get("allowlist")
+            approval = await self.registry.get("approval")
+            audit = await self.registry.get("audit")
+            return ExecutionSandbox(
+                registry=reg,
+                policy=policy,
+                allowlist=allowlist,
+                approval=approval,
+                audit=audit,
+                lifecycle=self.lifecycle,
+            )
+
+        self.registry.register("sandbox", _build_sandbox)
 
     async def _database_health(self) -> bool:
         db: DatabaseService | None = self.registry.try_get("database")
@@ -253,6 +458,32 @@ class CoreEngine:
                     current, available=False, detail="health check failed"
                 )
         return statuses
+
+    async def list_available_models(self) -> dict[str, list[str]]:
+        """Return available model IDs per provider without leaking errors."""
+        providers = self.registry.try_get("providers")
+        if providers is None:
+            return {}
+        result: dict[str, list[str]] = {}
+        for provider_id in getattr(providers, "ids", ()):
+            default_model = self._configured_model(provider_id)
+            models: list[str] = []
+            try:
+                provider = providers.get(provider_id)
+                listed = await provider.list_models()
+                models = [
+                    str(getattr(m, "id", m))
+                    for m in listed
+                    if getattr(m, "id", m)
+                ]
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - fallback to configured default
+                models = []
+            if default_model and default_model not in models:
+                models.insert(0, default_model)
+            result[provider_id] = models
+        return result
 
     def _provider_status(
         self,

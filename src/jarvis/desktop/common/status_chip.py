@@ -5,13 +5,15 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
 
+from jarvis.desktop.theme import theme
+
 _STATUS_COLORS = {
-    "healthy": "#39d98a",
-    "starting": "#ffb020",
-    "degraded": "#ffb020",
-    "unavailable": "#ff4d5e",
-    "stopped": "#7f95b2",
-    "unknown": "#7f95b2",
+    "healthy": theme.ACCENT_OK,
+    "starting": theme.ACCENT_WARN,
+    "degraded": theme.ACCENT_WARN,
+    "unavailable": theme.ACCENT_DANGER,
+    "stopped": theme.TEXT_MUTED,
+    "unknown": theme.TEXT_MUTED,
 }
 
 
@@ -26,12 +28,13 @@ class StatusChip(QFrame):
 
         self._dot = QLabel("●")
         self._dot.setFixedWidth(14)
-        self._label = QLabel(service)
+        self._label = QLabel(service.replace("_", " ").title())
+        self._label.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; font-weight: 500;")
         self._detail = QLabel("unknown")
-        self._detail.setStyleSheet("color: #7f95b2; font-size: 11px;")
+        self._detail.setStyleSheet(f"color: {theme.TEXT_MUTED}; font-size: 11px;")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 4, 10, 4)
+        layout.setContentsMargins(12, 6, 12, 6)
         layout.setSpacing(8)
         layout.addWidget(self._dot)
         layout.addWidget(self._label)
@@ -41,7 +44,7 @@ class StatusChip(QFrame):
 
     def set_status(self, status: str, detail: str = "") -> None:
         color = _STATUS_COLORS.get(status, _STATUS_COLORS["unknown"])
-        self._dot.setStyleSheet(f"color: {color}; font-size: 12px;")
+        self._dot.setStyleSheet(f"color: {color}; font-size: 11px;")
         self._detail.setText(detail or status)
 
     @property

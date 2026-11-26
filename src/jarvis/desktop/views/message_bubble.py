@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
 )
@@ -16,20 +18,26 @@ from jarvis.desktop.viewmodels.chat_models import (
     STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_FAILED,
+    STATUS_INTERRUPTED,
+    STATUS_PENDING,
     STATUS_STREAMING,
     ConversationMessage,
 )
 
 _STATUS_COLORS = {
+    STATUS_PENDING: theme.TEXT_MUTED,
     STATUS_STREAMING: theme.ACCENT,
     STATUS_COMPLETED: theme.TEXT_MUTED,
     STATUS_FAILED: theme.ACCENT_DANGER,
     STATUS_CANCELLED: theme.ACCENT_WARN,
+    STATUS_INTERRUPTED: theme.ACCENT_WARN,
 }
 
 
 class MessageBubble(QFrame):
     """One selectable, word-wrapped message. No HTML or Markdown rendering."""
+
+    retry_requested = Signal(str)
 
     def __init__(
         self,
@@ -48,12 +56,12 @@ class MessageBubble(QFrame):
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(18, 13, 18, 11)
+        layout.setSpacing(8)
 
         header = QHBoxLayout()
         header.setSpacing(8)
-        self._author = QLabel("YOU" if message.role == "user" else "JARVIS")
+        self._author = QLabel("You" if message.role == "user" else "JARVIS")
         self._author.setObjectName("BubbleAuthor")
         self._origin = QLabel("")
         self._origin.setObjectName("BubbleOrigin")
@@ -75,13 +83,32 @@ class MessageBubble(QFrame):
         )
         layout.addWidget(self.content_label)
 
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
         self.meta_label = QLabel()
         self.meta_label.setObjectName("BubbleMeta")
         self.meta_label.setWordWrap(True)
         self.meta_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        layout.addWidget(self.meta_label)
+        footer.addWidget(self.meta_label, 1)
+
+        self.copy_button = QPushButton("Copy")
+        self.copy_button.setObjectName("IconButton")
+        self.copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.copy_button.clicked.connect(self._copy_content)
+        footer.addWidget(self.copy_button)
+
+        self.retry_button = QPushButton("Retry")
+        self.retry_button.setObjectName("GhostButton")
+        self.retry_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.retry_button.clicked.connect(
+            lambda: self.retry_requested.emit(self.message_id)
+        )
+        self.retry_button.hide()
+        footer.addWidget(self.retry_button)
+
+        layout.addLayout(footer)
 
         self.update_message(message)
 
@@ -92,10 +119,14 @@ class MessageBubble(QFrame):
         text = message.content
         if message.status == STATUS_STREAMING:
             text = f"{text} ▍" if text else "…"
+        elif message.status == STATUS_PENDING:
+            text = text or "…"
         elif message.status == STATUS_FAILED and not text:
             text = "No response was produced."
         elif message.status == STATUS_CANCELLED and not text:
             text = "Stopped before a response was received."
+        elif message.status == STATUS_INTERRUPTED and not text:
+            text = "Generation was interrupted."
         self.content_label.setText(text)
 
         timestamp = message.created_at.strftime("%H:%M")
@@ -114,6 +145,8 @@ class MessageBubble(QFrame):
                 parts.append(f"completed · {timestamp}")
                 if message.tokens_used:
                     parts.append(f"{message.tokens_used} tokens")
+            elif status == STATUS_PENDING:
+                parts.append(f"preparing · {timestamp}")
             elif status == STATUS_STREAMING:
                 parts.append(f"streaming · {timestamp}")
             elif status == STATUS_FAILED:
@@ -122,6 +155,8 @@ class MessageBubble(QFrame):
                 parts.append(timestamp)
             elif status == STATUS_CANCELLED:
                 parts.append(f"stopped · {timestamp}")
+            elif status == STATUS_INTERRUPTED:
+                parts.append(f"interrupted · {timestamp}")
         else:
             self._origin.setText("")
             parts.append(timestamp)
@@ -131,6 +166,17 @@ class MessageBubble(QFrame):
             f"color: {_STATUS_COLORS.get(status, theme.TEXT_MUTED)}; "
             "font-size: 10px;"
         )
+        can_retry = (
+            message.role == "assistant"
+            and status in (STATUS_FAILED, STATUS_CANCELLED, STATUS_INTERRUPTED)
+            and bool(message.request_id)
+        )
+        self.retry_button.setVisible(can_retry)
+
+    def _copy_content(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self.content_label.text())
 
     def set_max_width(self, width: int) -> None:
         self.setMaximumWidth(max(260, width))

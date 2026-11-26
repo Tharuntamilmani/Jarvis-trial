@@ -10,6 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -161,6 +162,13 @@ class ChatView(QWidget):
         self.assistant_status.setObjectName("AssistantStatus")
         self.provider_pill = QLabel("LOCAL")
         self.provider_pill.setObjectName("ProviderPill")
+        self.persistence_pill = QLabel("DB UNAVAILABLE")
+        self.persistence_pill.setObjectName("DangerPill")
+        self.persistence_pill.hide()
+        self.retry_db_button = QPushButton("Retry DB")
+        self.retry_db_button.setObjectName("GhostButton")
+        self.retry_db_button.clicked.connect(self._retry_db)
+        self.retry_db_button.hide()
         self.kill_pill = QLabel("KILL SWITCH")
         self.kill_pill.setObjectName("DangerPill")
         self.kill_pill.hide()
@@ -168,6 +176,8 @@ class ChatView(QWidget):
         layout.addWidget(self.assistant_status)
         layout.addSpacing(6)
         layout.addWidget(self.provider_pill)
+        layout.addWidget(self.persistence_pill)
+        layout.addWidget(self.retry_db_button)
         layout.addWidget(self.kill_pill)
         return header
 
@@ -254,6 +264,15 @@ class ChatView(QWidget):
 
         row = QHBoxLayout()
         row.setSpacing(10)
+        self.provider_selector = QComboBox()
+        self.provider_selector.setObjectName("ProviderSelector")
+        self.provider_selector.addItem("Auto (Local First)", ("", ""))
+        self.provider_selector.addItem("Ollama (Local)", ("ollama", ""))
+        self.provider_selector.addItem("Groq (Cloud · Consent)", ("groq", ""))
+        self.provider_selector.currentIndexChanged.connect(
+            self._on_provider_selection_changed
+        )
+        row.addWidget(self.provider_selector)
         self.hint_label = QLabel("Enter to send · Shift+Enter for a new line")
         self.hint_label.setObjectName("ComposerHint")
         row.addWidget(self.hint_label)
@@ -267,12 +286,7 @@ class ChatView(QWidget):
         row.addWidget(self.send_button)
         layout.addLayout(row)
 
-        if self._controller is None:
-            self.input.setEnabled(False)
-            self.input.setPlaceholderText("Chat service unavailable")
-            self.send_button.setEnabled(False)
-            self.error_label.setText("Chat service is unavailable.")
-            self.error_label.show()
+        self._sync_service_availability()
         return panel
 
     # -- Wiring --------------------------------------------------------------------
@@ -309,8 +323,17 @@ class ChatView(QWidget):
             self._on_provider_status
         )
         self._controller.error_occurred.connect(self._show_error)
+        self._controller.input_restored.connect(self._restore_input)
 
     # -- Composer actions -----------------------------------------------------------
+
+    def _restore_input(self, text: str) -> None:
+        """Put the user's text back after a persistence failure."""
+        if not text:
+            return
+        self.input.setPlainText(text)
+        self.input.setFocus()
+        self._update_send_enabled()
 
     def _send(self) -> None:
         if self._controller is None:
@@ -332,9 +355,65 @@ class ChatView(QWidget):
             self.stop_button.setText("Stopping…")
             self.stop_button.setEnabled(False)
 
+    def _retry_message(self, message_id: str) -> None:
+        if self._controller is None:
+            return
+        self._controller.retry(message_id)
+
+    def _on_provider_selection_changed(self, _index: int) -> None:
+        if self._controller is None:
+            return
+        data = self.provider_selector.currentData()
+        if isinstance(data, tuple) and len(data) == 2:
+            provider, model = data
+            self._controller.set_model_selection(
+                provider or None, model or None
+            )
+
+    def _retry_db(self) -> None:
+        if self._controller is None:
+            return
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._controller.retry_persistence_connection())
+
     def _show_error(self, message: str) -> None:
         self.error_label.setText(message)
         self.error_label.show()
+
+    def _sync_service_availability(self) -> None:
+        if self._controller is None:
+            self.input.setEnabled(False)
+            self.input.setPlaceholderText("Chat service unavailable")
+            self.send_button.setEnabled(False)
+            self.error_label.setText("Chat service is unavailable.")
+            self.error_label.show()
+            self.persistence_pill.hide()
+            return
+        if self._controller.persistence_unavailable:
+            self.input.setEnabled(False)
+            self.input.setPlaceholderText(
+                "Conversation database is not reachable"
+            )
+            self.send_button.setEnabled(False)
+            self.error_label.setText(
+                "Conversation persistence is unavailable. "
+                "Messages cannot be sent until the database is reachable."
+            )
+            self.error_label.show()
+            self.persistence_pill.show()
+            self.retry_db_button.setVisible(
+                self._controller._persistence is not None  # noqa: SLF001
+            )
+            return
+        self.persistence_pill.hide()
+        self.retry_db_button.hide()
+        self.input.setEnabled(True)
+        self.input.setPlaceholderText("Message JARVIS…")
 
     def _update_send_enabled(self) -> None:
         if self._controller is None:
@@ -376,6 +455,7 @@ class ChatView(QWidget):
             row_layout.setContentsMargins(0, 0, 0, 0)
             bubble = MessageBubble(message)
             bubble.set_max_width(width)
+            bubble.retry_requested.connect(self._retry_message)
             if message.role == "user":
                 row_layout.addStretch(1)
                 row_layout.addWidget(bubble)
@@ -452,6 +532,7 @@ class ChatView(QWidget):
         self.assistant_status.setText(state_name.replace("_", " ").upper())
         self.kill_pill.setVisible(self._state.kill_switch_active)
 
+        self._sync_service_availability()
         if self._controller is None:
             self.provider_pill.setText("LOCAL · unavailable")
             self.provider_pill.setStyleSheet(

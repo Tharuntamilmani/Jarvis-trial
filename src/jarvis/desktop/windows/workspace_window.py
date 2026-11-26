@@ -16,11 +16,20 @@ from PySide6.QtWidgets import (
 )
 
 from jarvis.desktop.common.status_chip import StatusChip
+from jarvis.config.preferences import PreferencesService
 from jarvis.desktop.viewmodels.app_state import AppState
 from jarvis.desktop.viewmodels.chat_controller import ChatController
+from jarvis.desktop.viewmodels.security_controller import SecurityController
+from jarvis.desktop.viewmodels.vision_controller import VisionController
+from jarvis.desktop.viewmodels.voice_controller import VoiceController
+from jarvis.desktop.views.agents_view import AgentsView
 from jarvis.desktop.views.chat_view import ChatView
+from jarvis.desktop.views.history_view import HistoryView
+from jarvis.desktop.views.memory_view import MemoryView
+from jarvis.desktop.views.security_view import SecurityView
+from jarvis.desktop.views.settings_view import SettingsView
 
-_NAV_ITEMS = ("Chat", "History", "Memory", "Agents", "Settings", "Status")
+_NAV_ITEMS = ("Chat", "History", "Memory", "Agents", "Settings", "Status", "Security")
 _PROVIDER_NAMES = {"ollama": "Ollama", "groq": "Groq"}
 
 
@@ -37,6 +46,11 @@ class WorkspaceWindow(QWidget):
         state: AppState,
         chat_controller: ChatController | None = None,
         parent: QWidget | None = None,
+        *,
+        voice_controller: VoiceController | None = None,
+        vision_controller: VisionController | None = None,
+        security_controller: SecurityController | None = None,
+        preferences_service: PreferencesService | None = None,
     ) -> None:
         super().__init__(
             parent,
@@ -48,6 +62,10 @@ class WorkspaceWindow(QWidget):
         self.setObjectName("WorkspaceRoot")
         self._state = state
         self._controller = chat_controller
+        self._voice = voice_controller
+        self._vision = vision_controller
+        self._security = security_controller
+        self._preferences = preferences_service
         self._chips: dict[str, StatusChip] = {}
         self._provider_dots: dict[str, QLabel] = {}
         self._provider_details: dict[str, QLabel] = {}
@@ -70,9 +88,20 @@ class WorkspaceWindow(QWidget):
 
         content = QStackedWidget()
         content.addWidget(ChatView(self._state, self._controller))
-        for name in ("History", "Memory", "Agents", "Settings"):
-            content.addWidget(self._make_placeholder(name))
+        self.history_view = HistoryView(self._controller)
+        self.history_view.conversation_opened.connect(
+            lambda _cid: self.nav.setCurrentRow(0)
+        )
+        content.addWidget(self.history_view)
+        self.memory_view = MemoryView()
+        content.addWidget(self.memory_view)
+        self.agents_view = AgentsView(self._state)
+        content.addWidget(self.agents_view)
+        self.settings_view = self._make_settings_page()
+        content.addWidget(self.settings_view)
         content.addWidget(self._make_status_page())
+        self.security_view = SecurityView(self._state, self._security)
+        content.addWidget(self.security_view)
         self.content = content
         root.addWidget(content, 1)
 
@@ -83,8 +112,8 @@ class WorkspaceWindow(QWidget):
         sidebar.setObjectName("WorkspaceSidebar")
         sidebar.setFixedWidth(238)
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(14, 18, 14, 14)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 14, 14, 12)
+        layout.setSpacing(6)
 
         brand = QLabel("JARVIS")
         brand.setObjectName("SidebarBrand")
@@ -92,26 +121,29 @@ class WorkspaceWindow(QWidget):
         caption = QLabel("WORKSPACE")
         caption.setObjectName("SidebarCaption")
         layout.addWidget(caption)
-        layout.addSpacing(10)
+        layout.addSpacing(4)
 
         self.new_chat_button = QPushButton("＋  New Chat")
         self.new_chat_button.setObjectName("NewChatButton")
-        self.new_chat_button.setEnabled(self._controller is not None)
+        self.new_chat_button.setEnabled(
+            self._controller is not None
+            and self._controller.persistence_available
+            and not self._controller.finalizing
+        )
         self.new_chat_button.clicked.connect(self._new_chat)
         layout.addWidget(self.new_chat_button)
-        layout.addSpacing(8)
+        layout.addSpacing(4)
 
         conversations = QLabel("CONVERSATIONS")
         conversations.setObjectName("SidebarCaption")
         layout.addWidget(conversations)
         self.conversations = QListWidget()
         self.conversations.setObjectName("ConversationList")
-        self.conversations.setMaximumHeight(64)
-        QListWidgetItem("Current session", self.conversations)
-        self.conversations.setCurrentRow(0)
+        self.conversations.setMaximumHeight(82)
+        self.conversations.itemClicked.connect(self._on_sidebar_conversation_clicked)
         layout.addWidget(self.conversations)
 
-        layout.addSpacing(6)
+        layout.addSpacing(2)
         self.nav = QListWidget()
         self.nav.setObjectName("NavList")
         for item in _NAV_ITEMS:
@@ -214,12 +246,27 @@ class WorkspaceWindow(QWidget):
             self._controller.provider_status_changed.connect(
                 self._refresh_provider_rows
             )
+            self._controller.status_changed.connect(self._update_new_chat_state)
+            self._controller.conversations_changed.connect(
+                self._refresh_sidebar_conversations
+            )
+            self._controller.conversation_reset.connect(
+                self._refresh_sidebar_conversations
+            )
+        self._refresh_sidebar_conversations()
         for service, chip in self._chips.items():
             status = self._state.service_statuses.get(service)
             if status is not None:
                 chip.set_status(
                     status, self._state.service_details.get(service, "")
                 )
+
+    def _update_new_chat_state(self) -> None:
+        self.new_chat_button.setEnabled(
+            self._controller is not None
+            and self._controller.persistence_available
+            and not self._controller.finalizing
+        )
 
     def _on_service_status(self, service: str, status: str, detail: str) -> None:
         key = service if service in self._chips else None
@@ -279,6 +326,63 @@ class WorkspaceWindow(QWidget):
             return
         self._controller.new_chat()
         self.nav.setCurrentRow(0)
+
+    def _refresh_sidebar_conversations(self) -> None:
+        self.conversations.blockSignals(True)
+        try:
+            self.conversations.clear()
+            items = (
+                self._controller.conversations_list
+                if self._controller is not None
+                else ()
+            )
+            if not items:
+                QListWidgetItem("Current session", self.conversations)
+                self.conversations.setCurrentRow(0)
+                return
+            active_id = (
+                self._controller.conversation_id
+                if self._controller is not None
+                else None
+            )
+            selected_row = -1
+            for idx, summary in enumerate(items[:10]):
+                item = QListWidgetItem(summary.title, self.conversations)
+                item.setData(Qt.ItemDataRole.UserRole, summary.id)
+                if summary.id == active_id:
+                    selected_row = idx
+            if selected_row >= 0:
+                self.conversations.setCurrentRow(selected_row)
+        finally:
+            self.conversations.blockSignals(False)
+
+    def _on_sidebar_conversation_clicked(self, item: QListWidgetItem) -> None:
+        cid = item.data(Qt.ItemDataRole.UserRole)
+        if not cid or self._controller is None:
+            return
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._switch_and_focus_chat(str(cid)))
+
+    async def _switch_and_focus_chat(self, conversation_id: str) -> None:
+        if self._controller is not None:
+            if await self._controller.switch_conversation(conversation_id):
+                self.nav.setCurrentRow(0)
+
+    def _make_settings_page(self) -> QWidget:
+        view = SettingsView(
+            self._state,
+            voice_controller=self._voice,
+            vision_controller=self._vision,
+            preferences_service=self._preferences,
+        )
+        self.voice_controls = view.voice_controls
+        self.vision_controls = view.vision_controls
+        return view
 
     def _refresh_providers(self) -> None:
         if self._controller is None:

@@ -46,12 +46,27 @@ class DatabaseService:
         """Create the engine and session factory (idempotent)."""
         if self._engine is not None:
             return
+        connect_args: dict[str, Any] = {}
+        if "+asyncpg" in self._settings.database_url:
+            # Bound driver connect time and per-statement server time. These
+            # are the inner bounds; the outer budget is applied per operation
+            # with ``asyncio.timeout``.
+            connect_args = {
+                "timeout": self._settings.db_connect_timeout_seconds,
+                "server_settings": {
+                    "statement_timeout": str(
+                        self._settings.db_statement_timeout_ms
+                    ),
+                },
+            }
         self._engine = create_async_engine(
             self._settings.database_url,
             pool_size=self._settings.db_pool_size,
             max_overflow=self._settings.db_max_overflow,
             pool_recycle=self._settings.db_pool_recycle_seconds,
+            pool_timeout=self._settings.db_pool_timeout_seconds,
             pool_pre_ping=True,  # validate connections before use
+            connect_args=connect_args,
             echo=False,
         )
         self._session_factory = async_sessionmaker(
@@ -76,17 +91,35 @@ class DatabaseService:
 
     @contextlib.asynccontextmanager
     async def session(self) -> Any:
-        """Provide a transactional session scope."""
+        """Provide a transactional session scope.
+
+        Cancellation-safe: any ``BaseException`` — including
+        ``asyncio.CancelledError`` — triggers a best-effort rollback and is
+        re-raised unchanged. Cleanup failures never replace the original
+        exception, and the session is always closed.
+
+        A cancellation during ``commit()`` is inherently ambiguous: the
+        transaction may or may not have reached the server. This method does
+        not guess. Callers that need certainty must reconcile through their
+        own idempotency key (see ``jarvis.conversations.service``).
+        """
         if self._session_factory is None:
             self.connect()
         assert self._session_factory is not None
-        async with self._session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
+        session = self._session_factory()
+        try:
+            yield session
+            await session.commit()
+        except BaseException:
+            # Best-effort rollback. Cleanup is deliberately suppressed so a
+            # failing rollback/close can never replace the original
+            # exception or swallow a cancellation.
+            with contextlib.suppress(BaseException):
                 await session.rollback()
-                raise
+            raise
+        finally:
+            with contextlib.suppress(BaseException):
+                await session.close()
 
     # -- Health & recovery ---------------------------------------------------------
 

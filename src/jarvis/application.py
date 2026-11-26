@@ -15,12 +15,17 @@ from jarvis.monitoring.logging import setup_logging
 class JarvisApplication:
     """Application-level bootstrap without any UI dependency."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        safe_mode: bool = False,
+    ) -> None:
         self.settings = settings or get_settings()
         setup_logging(
             level=self.settings.log_level, log_dir=self.settings.log_dir
         )
-        self.engine = CoreEngine(self.settings)
+        self.engine = CoreEngine(self.settings, safe_mode=safe_mode)
         self.engine.assemble()
 
     async def start(self) -> None:
